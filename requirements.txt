@@ -1,0 +1,19 @@
+fastapi==0.115.6
+uvicorn==0.32.1
+openai>=1.99.0
+python-dotenv==1.0.1
+pydantic==2.10.4
+httpx==0.28.1
+requests==2.32.3
+rembg[cpu]
+Pillow
+supabase
+tiktoken
+psutil
+# Face swapping dependencies
+insightface>=0.7.3
+onnxruntime>=1.16.0
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
+# mediapipe>=0.10.0  # Optional - enables pose-based cropping for better results
+# Face restoration dependencies removed - not needed

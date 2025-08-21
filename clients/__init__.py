@@ -1,0 +1,1 @@
+# Clients layer: external systems adapters (HTTP APIs, SDKs) 

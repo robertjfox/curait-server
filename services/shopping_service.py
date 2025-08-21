@@ -1,0 +1,56 @@
+import os
+import logging
+from typing import Dict, Any, List, Optional
+
+logger = logging.getLogger(__name__)
+
+
+class ShoppingService:
+    """Shopping service that directly uses serper or serpapi clients based on SEARCH_PROVIDER env var."""
+    
+    def __init__(self, max_concurrency: Optional[int] = None):
+        self._provider = os.getenv("SEARCH_PROVIDER", "serper").lower().strip()
+        self._client = None
+        self._max_concurrency = max_concurrency
+        
+        # Initialize the appropriate client
+        if self._provider == "serpapi":
+            try:
+                from clients.shopping.serpapi_client import SerpApiShoppingClient
+                self._client = SerpApiShoppingClient(max_concurrency=max_concurrency)
+            except ImportError:
+                logger.warning("SerpApi client not available, falling back to Serper")
+                self._provider = "serper"
+        
+        if self._provider == "serper" or self._client is None:
+            from clients.shopping.serper_client import SerperShoppingClient
+            self._client = SerperShoppingClient(max_concurrency=max_concurrency)
+    
+    async def search_for_keywords(
+        self, 
+        keywords: str, 
+        user_data: Dict[str, Any], 
+        thread_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Search for products based on keywords."""
+        try:
+            results = await self._client.search_item(
+                keywords=keywords,
+                user_gender=user_data.get("gender"),
+                thread_id=thread_id,
+            )
+            return results or []
+        except Exception as e:
+            logger.error(f"Shopping search failed for keywords '{keywords}': {e}")
+            return []
+    
+    async def aclose(self):
+        """Close the underlying client."""
+        if self._client:
+            await self._client.aclose()
+    
+    async def __aenter__(self):
+        return self
+    
+    async def __aexit__(self, exc_type, exc, tb):
+        await self.aclose() 
