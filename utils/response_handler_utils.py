@@ -4,7 +4,7 @@ import re
 import asyncio
 from typing import Dict, Any, List, Optional, AsyncGenerator
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 # Streaming response utilities
@@ -50,43 +50,64 @@ def extract_keywords_from_partial_json(partial_content: str) -> Optional[List[st
         logger.error(f"Error extracting keywords from partial JSON: {e}")
         return None
 
+def extract_metadata_from_json(content: str) -> Optional[Dict[str, Any]]:
+    """Extract metadata from JSON content as simply as possible."""
+    try:
+        data = json.loads(content)
+        return data.get("metadata") if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        logger.error("Failed to parse JSON content")
+        return None
+
 
 async def process_streaming_outfit_response(
     stream: AsyncGenerator,
-    num_outfits: int,
-    num_items: int,
-    early_search_callback: Optional[callable] = None
-) -> str:
+    item_db_ids: List[str],
+    _process_single_item_cb: Optional[callable] = None
+) -> Dict[str, Any]:
     """Process streaming outfit response and extract keywords early for search."""
     full_content = ""
-    processed_keywords = set()  # Track which keywords we've already processed
-    
-    async for chunk in stream:
-        if chunk.choices[0].delta.content:
-            content_chunk = chunk.choices[0].delta.content
-            full_content += content_chunk
-            
-            # Continuously extract new keywords as content grows
-            if len(full_content) > 100 and early_search_callback:  # Lower threshold
-                keywords = extract_keywords_from_partial_json(full_content)
-                if keywords:
-                    # Only process new keywords we haven't seen before
-                    new_keywords = [kw for kw in keywords if kw not in processed_keywords]
-                    if new_keywords:
-                        processed_keywords.update(new_keywords)
-                        asyncio.create_task(early_search_callback(new_keywords))
-    
-    return full_content
+    processed_keywords = set()
 
+    remaining_item_ids = item_db_ids.copy()
 
-def parse_final_outfit_json(content: str) -> Dict[str, Any]:
-    """Parse final outfit JSON with fallback handling."""
     try:
-        return json.loads(content)
-    except json.JSONDecodeError:
-        # Try to extract JSON if model included extra text
-        json_match = re.search(r"\{.*\}", content, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group(0))
+        async for chunk in stream:
+            try:
+                if chunk.choices[0].delta.content:
+                    content_chunk = chunk.choices[0].delta.content
+                    full_content += content_chunk
+
+                    # Continuously extract new keywords as content grows
+                    if len(full_content) > 100:  # Lower threshold
+                        keywords = extract_keywords_from_partial_json(full_content)
+                        if keywords:
+                            # Only process new keywords we haven't seen before
+                            new_keywords = [kw for kw in keywords if kw not in processed_keywords]
+
+                            for new_keyword in new_keywords:
+                                processed_keywords.add(new_keyword)
+                                if remaining_item_ids:
+                                    next_item_id = remaining_item_ids.pop(0)
+                                    asyncio.create_task(_process_single_item_cb(new_keyword, next_item_id))
+                                else:
+                                    logger.warning(f"No more item IDs available for keyword: {new_keyword}")
+            except Exception as chunk_error:
+                logger.warning(f"Error processing streaming chunk: {chunk_error}")
+                # Continue processing other chunks
+                continue
+                
+    except Exception as stream_error:
+        logger.error(f"Error processing streaming response: {stream_error}")
+        # If we have partial content, try to extract metadata from it
+        if full_content:
+            logger.info("Attempting to extract metadata from partial content")
         else:
-            raise ValueError("Failed to parse outfit generation response as JSON") 
+            logger.error("No content received before stream error")
+            raise stream_error
+    
+    # return the metadata section of the full content as a dict
+    return extract_metadata_from_json(full_content)
+    
+
+

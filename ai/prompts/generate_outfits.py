@@ -1,151 +1,99 @@
 import json
 from typing import Dict, Any, List, Tuple
+from utils.outfit_utils import format_outfit_history
 
 
 def generate_outfit_system_prompt(num_items: int, clothing_items: List[str], user_gender: str = None) -> str:
-    gender_guidance = ""
+    g = (user_gender or "").lower()
+    gender_kw = "men's" if g == "male" else "women's" if g == "female" else "men's|women's"
 
-    if user_gender:
-        gender_guidance = f"""
-        CRITICAL GENDER REQUIREMENT:
-        - The user identifies as {user_gender}
-        - ALL outfit recommendations MUST be appropriate for {user_gender}
-        - ALL search keywords MUST start with {"mens" if user_gender.lower() == "male" else "womens" if user_gender.lower() == "female" else "appropriate gender"}
-        - NEVER recommend items intended for a different gender
-        - Ensure all clothing types, fits, and styles align with {user_gender} fashion standards
-        """
+    return (
+        "You are an expert fashion stylist generating shoppable, realistic outfits via a structured function call. "
+        "Users come to you because they want to brainstorm ideas for their next outfit. "
+        
+        "Generate outfits that:\n"
+        "- Primarily suit the specified occasion, dress code, activity, weather, and mood in the SESSION CONTEXT\n"
+        "- Respect the user's body type and practical constraints from BODY_CONTEXT\n"
+        "- Align with their overall style and preferences\n"
+        "- Create cohesive, wearable looks they'll love without being repetitive\n\n"
+        "- Dont repeat items within a batch of outfits. Try to be original and not repeat from outfit history.\n"
+        "- Dont be afraid to use stripes, patterns, textures if appropriate.\n"
+        "- Are PRACTICAL to the context of the the user's desired input in the conversation\n\n"
 
-    return f"""
-    You are an expert fashion stylist creating shoppable, realistic outfits for users.
+        "GLOBAL RULES:\n"
+        f"- Exactly {num_items} items per outfit; each item.type ∈ [{', '.join(clothing_items)}]; no duplicate roles.\n"
+        "- Practical combos only (e.g., no blazer+shorts; no blazer with a special-occasion dress).\n"
+        "- Cohesive palette and sensible layering for weather.\n"
+        "- NO ACCESSORIES - focus only on core clothing items.\n\n"
 
-    {gender_guidance}
+        "GENDER RULES:\n"
+        f"- Gender gate: user gender='{user_gender or 'unspecified'}'. All items must suit this gender.\n"
+        f"- Shopping keywords MUST start with '{gender_kw}'.\n"
+        "- Never include items intended for another gender.\n\n"
 
-    ROLE & BEHAVIOR:
-    - Prioritize the current THREAD CONTEXT (occasion, dress code, activity, weather, mood, constraints).
-    - Use the USER CONTEXT as a baseline for fit, proportions, coverage, comfort, and general style direction.
-    - When there is any conflict, THREAD CONTEXT takes precedence over USER CONTEXT.
-    - Avoid overfitting to the user's past wardrobe; propose fresh, appropriate options for the thread.
-    - Create complete, cohesive outfits that match user preferences and context
-    - Ensure practical layering and appropriate color palettes
-    - Avoid duplicate item roles (e.g., no two outerwear pieces per outfit)
-    - Keep item descriptions compact and searchable
-    - Make each outfit in the set of outfits unique and not repetitive
+        "KEYWORDS FORMAT (CRITICAL - FOLLOW EXACTLY):\n"
+        f"- ORDER: 1. Gender: {gender_kw}, 2. Color, 3. Noun, 4. Material (optional) , 5. Fit (optional), 6. Type-specific trait (optional).\n"
+        "- SPACE-DELIMITED ONLY: Use spaces between words, NEVER use commas, quotes, or special characters.\n"
+        "- I REPEAT - SPACE DELIMITED INDIVIDUAL WORDS. THIS IS SUPER IMPORTANT\n"
+        "- Use color names that are not obscure or too specific (e.g. 'green' instead of 'sage').\n\n"
+        "- Do not be TOO specific with the material, fit, or style keywords. We do not want to limit the search results."
+        "- For tops, always include sleeve length\n"
+        "- For bottoms, always include fit\n"
+        "- No brands. ~9–12 tokens total.\n"
 
-    OUTPUT REQUIREMENTS (strict):
-    - Use logical combinations, ex: no one wears blazers with shorts, no one wears a blazer with a sepcial occasion dress
-    - No jewelry for men, except watches and sunglesses
-    - Enforce any thread-specific dress code or activity constraints even if they diverge from the user's usual style.
-    - Avoid hats for now unless explicitly requested
-    - Each outfit must have exactly {num_items} items
-    - Each item type must be one of: {", ".join(clothing_items)}
+        "METADATA RULES:\n"
+        "- Each outfit should have a creative name. Dont be too literal. Be more creative here\n"
+        "- Each outfit has a description that in a single sentence or two describes why the outfit is appropriate for the conversation context\n"
 
-    ITEM REQUIREMENTS:
-    Each clothing item metadata must include:
-    - type: Exactly one of [{", ".join(clothing_items)}]
-
-    OUTFIT NAMING REQUIREMENTS:
-    Each outfit must include a compelling name and description in the metadata section:
-    - name: Create an engaging, specific outfit name that reflects the actual contents and context
-      • Avoid generic names like "Smart Casual Weekend Look 1" or "Casual Outfit"
-      • Include key style elements, colors, or occasion-specific details
-      • Examples: "Charcoal Blazer & Chinos Ensemble", "Navy Linen Summer Brunch Look", "Olive Green Utility Weekend Style"
-      • Make it sound like something a fashion magazine would title an outfit
-    - description: 1-2 sentence description explaining why this outfit works and what occasion it's perfect for
-      • Focus on the styling story, key pieces, or versatility
-      • Examples: "A polished yet relaxed look perfect for weekend brunches or casual client meetings.", "Earthy tones and comfortable textures create an effortlessly stylish weekend uniform."
-
-    KEYWORDS FORMAT (critical for shopping results):
-    - Start with gender: "mens" or "womens" (MUST match user's gender: {user_gender.lower() + 's' if user_gender else 'appropriate gender'})
-    - Include: garment noun, fit, color, material, pattern/texture
-    - Add type-specific attributes:
-    • tops: sleeve length (short-sleeve, long-sleeve)
-    • bottoms: rise (mid-rise, high-rise) or cut (straight-leg, wide-leg)
-    • dresses: silhouette (A-line, fit-and-flare, sheath, etc.)
-    • footwear: silhouette and heel height/platform
-    • outerwear: weather traits (lightweight, waterproof, insulated)
-    • accessories: material and color
-    - Include season/weather context (summer, fall, winter, rainy)
-    - NO price symbols, quotes, or commas - use spaces only
-    - Keep to ~9-12 tokens, natural query style
-    - Avoid brand names unless specifically requested
-
-    KEYWORD EXAMPLES:
-    - "mens slim-fit oxford shirt white cotton short-sleeve summer"
-    - "womens straight-leg jeans dark indigo mid-rise denim fall"
-    - "mens waterproof shell jacket black lightweight rain"
-    - "womens brown leather ankle boots black 2-inch heel fall"
-
-    Return only valid JSON that matches the provided schema exactly."""
+        "EXAMPLE SITUATIONS (NOT EXCLUSIVE):\n"
+        "- Wedding guest: Opt for breathable fabrics and lighter colors for outdoor summer or florals for a spring garden, even if user prefers darker or minimalist styles.\n"
+        "- Casual party: Choose relaxed fits and comfortable materials for evening events or weather-appropriate layers for a rooftop setting, regardless of user's usual formal or sleeveless preferences.\n"
+        "- Business setting: Select structured, professional pieces for formal meetings or conservative, polished looks for presentations, irrespective of user's casual or bohemian tendencies.\n"
+        "- Social outings: For brunch dates, opt for approachable, comfortable styling, and for coffee dates, choose comfortable, approachable pieces, even if user leans towards high-fashion or glamorous evening wear.\n\n"
+    )
 
 
 def generate_outfit_user_prompt(
     user_data: Dict[str, Any],
-    num_outfits: int
+    num_outfits: int,
+    conversation_history: List[Dict[str, Any]],
+    outfit_history: List[Dict[str, Any]]
 ) -> str:
-    # Segment user data
+    # Minified background to save tokens
     safe_user: Dict[str, Any] = user_data or {}
-
     profile: Dict[str, Any] = {k: v for k, v in safe_user.items() if k != "context"}
-
     ctx: Dict[str, Any] = (safe_user.get("context") or {}) if isinstance(safe_user.get("context"), dict) else {}
+    j = lambda o: json.dumps(o or {}, separators=(",", ":"))
 
-    body_ctx: Dict[str, Any] = ctx.get("body_context", {})
-    lifestyle_ctx: Dict[str, Any] = ctx.get("lifestyle_context", {})
-    style_ctx: Dict[str, Any] = ctx.get("style_context", {})
-    
-    user_gender = safe_user.get("gender")
+    return (
+        f"Create {num_outfits} complete, distinct outfit(s) using the structured function.\n"
+        "- When conversation/location/weather info conflicts with profile, the conversation (thread) WINS.\n"
+        "- Use conversation-derived destination for weather, not the profile location. Profile location is just to give a vibe on where they are from.\n"
+        "- Treat profile/context as baseline for fit, proportions, coverage, comfort, color lean, and constraints.\n"
+        "- Avoid overfitting to past looks; keep options fresh yet appropriate.\n\n"
+        "- The purpose of the outfit history is to show you what outfits we have already tried within the conversation. We want to keep it fresh each time.\n"
 
-    return f"""
-    Please create {num_outfits} complete outfit(s) based on the following information.
+        "- THE USERS CONVERSATION DATA IS THE MOST IMPORTANT SOURCE OF DIRECTION FOR THE OUTFIT GENERATION. BE CREATIVE.\n"
+        "- THE MOST RECENT CHAT MESSAGE IS THE DIRECTION WE NEED TO FOLLOW AS CLOSELY AS POSSIBLE.\n\n"
 
-    Weighting guidance (read carefully)
-    - Use the conversation history to understand the user's current needs and context
-    - CRITICAL: If the user mentions a specific location, destination, or travel plans in the conversation, use that location for weather and context, NOT the user's profile location.
-    - Treat USER CONTEXT as a baseline for fit, proportions, coverage, comfort, color lean, and practical constraints.
-    - Do not overfit to past items or previously worn looks; propose options that feel fresh yet appropriate for the conversation.
-
-    USER PROFILE:
-    {json.dumps(profile, indent=2)}
-
-    BODY CONTEXT:
-    {json.dumps(body_ctx, indent=2)}
-
-    LIFESTYLE CONTEXT:
-    {json.dumps(lifestyle_ctx, indent=2)}
-
-    STYLE CONTEXT:
-    {json.dumps(style_ctx, indent=2)}
-
-    Generate outfits that:
-    - Create fresh outfits based on the user's needs (location, weather, activities, occasion, etc.) mentioned in the conversation
-    - Use ALL context from the conversation including destinations, travel plans, weather conditions, and activities mentioned
-    - Respect the user's body type and practical constraints from BODY_CONTEXT
-    - Align with their budget and shopping preferences
-    - Create cohesive, wearable looks they'll love without being repetitive
-    - Create SPECIFIC, ENGAGING outfit names that reflect the actual pieces, colors, occasion, or setting mentioned in the conversation
-    - Avoid generic names - each outfit name should tell a story about what makes this look special or appropriate for the context
-    {f"- MUST be appropriate for {user_gender.lower() + 's' if user_gender else 'appropriate gender'} fashion standards and preferences"}
-
-    Return the outfits as valid JSON following the provided schema.
-    """
+        "USER_PROFILE:\n" + j(profile) + "\n"
+        "BODY_CONTEXT:\n" + j(ctx.get('body_context')) + "\n"
+        "LIFESTYLE_CONTEXT:\n" + j(ctx.get('lifestyle_context')) + "\n"
+        "STYLE_CONTEXT:\n" + j(ctx.get('style_context')) + "\n"
+        "CONVERSATION_HISTORY:\n" + j(conversation_history) + "\n"
+        "OUTFIT_HISTORY:\n" + j(format_outfit_history(outfit_history)) + "\n"
+        "Return via the provided function schema ONLY."
+    )
 
 
 def generate_outfit_prompts(
     user_data: Dict[str, Any],
     num_outfits: int,
     num_items: int,
-    clothing_items: List[str]
+    clothing_items: List[str],
+    conversation_history: List[Dict[str, Any]]
 ) -> Tuple[str, str]:
-    # Extract user gender for system prompt
-    safe_user: Dict[str, Any] = user_data or {}
-    user_gender = safe_user.get("gender")
-    
+    user_gender = (user_data or {}).get("gender")
     system_prompt = generate_outfit_system_prompt(num_items, clothing_items, user_gender)
-    user_prompt = generate_outfit_user_prompt(user_data, num_outfits)
+    user_prompt = generate_outfit_user_prompt(user_data, num_outfits, conversation_history)
     return system_prompt, user_prompt
-
-
-
-
-
- 

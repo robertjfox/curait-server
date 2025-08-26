@@ -25,8 +25,11 @@ SHOPPING_RESULTS_TO_FETCH = int(os.getenv("SHOPPING_RESULTS_TO_FETCH", "40"))
 SHOPPING_RESULTS_TO_RANK = int(os.getenv("SHOPPING_RESULTS_TO_RANK", "20"))
 
 CLOTHING_ITEMS = [
-   "outerwear",  "tops", "dresses", "bottoms",  "accessories", "footwear",
+   "outerwear",  "tops", "dresses", "bottoms", "footwear",
 ]
+
+# Product ranking toggle
+PRODUCT_RANKING_ENABLED = os.getenv("PRODUCT_RANKING_ENABLED", "true").lower() in ("1", "true", "yes", "on")
 
 # Background removal toggle (now only applies to top ranked product)
 BACKGROUND_REMOVAL_ENABLED = os.getenv("BACKGROUND_REMOVAL_ENABLED", "true").lower() in ("1", "true", "yes", "on")
@@ -41,6 +44,12 @@ RANKING_MAX_RETRIES = int(os.getenv("RANKING_MAX_RETRIES", "1"))  # Number of re
 RANKING_RETRY_DELAY = float(os.getenv("RANKING_RETRY_DELAY", "1.0"))  # Initial delay between retries in seconds
 RANKING_TIMEOUT = int(os.getenv("RANKING_TIMEOUT", "60"))  # Timeout for ranking operations in seconds
 VIRTUAL_TRYON_TIMEOUT = int(os.getenv("VIRTUAL_TRYON_TIMEOUT", "120"))  # Timeout for VTO operations
+
+# OpenAI client timeout settings (in seconds)
+OPENAI_CONNECT_TIMEOUT = float(os.getenv("OPENAI_CONNECT_TIMEOUT", "10.0"))  # Connection timeout
+OPENAI_READ_TIMEOUT = float(os.getenv("OPENAI_READ_TIMEOUT", "300.0"))  # Read timeout (5 minutes for streaming)
+OPENAI_WRITE_TIMEOUT = float(os.getenv("OPENAI_WRITE_TIMEOUT", "60.0"))  # Write timeout
+OPENAI_POOL_TIMEOUT = float(os.getenv("OPENAI_POOL_TIMEOUT", "60.0"))  # Pool timeout
 
 VTON_ENABLED = os.getenv("VTON_ENABLED", "true").lower() in ("1", "true", "yes", "on")
 FACE_SWAP_ENABLED = os.getenv("FACE_SWAP_ENABLED", "true").lower() in ("1", "true", "yes", "on")

@@ -33,13 +33,17 @@ ANALYSIS RULES:
 - Look for style changes: "printed", "solid", "striped"
 - If no specific item is mentioned, infer from context (e.g., "make it blue" might refer to the most prominent item)
 
-KEYWORD REQUIREMENTS:
+KEYWORD FORMAT REQUIREMENTS (CRITICAL):
+- SPACE-SEPARATED ONLY: Use spaces between words, NEVER commas, quotes, or special characters
+- CORRECT FORMAT: 'mens slim fit navy cotton chinos'
+- WRONG FORMAT: 'mens, slim-fit, navy, cotton, chinos' (NO COMMAS!)
+- WRONG FORMAT: 'men's slim-fit navy cotton chinos' (NO APOSTROPHES OR HYPHENS!)
 - Include: garment noun, fit, color, material, pattern/texture
 - Add type-specific attributes based on the item type
 - Include season/weather context if relevant
-- NO price symbols, quotes, or commas - use spaces only
 - Keep to ~9-12 tokens, natural query style
 - Avoid brand names unless specifically requested
+- Each keyword string must be simple space-separated words only
 
 {gender_context}
 

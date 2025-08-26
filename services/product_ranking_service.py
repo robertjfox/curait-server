@@ -5,7 +5,6 @@ from typing import Any, Dict, List
 
 from clients.openai_client import get_openai_client
 import _config
-from utils.image_processing.background_removal import SupabaseBackgroundProcessor
 from utils.image_processing.create_image_grid import create_product_grid_and_upload
 import base64
 
@@ -30,9 +29,8 @@ class ProductRankingService:
         K = SHOPPING_RESULTS_TO_RETURN. On any failure, return the first K results
         unchanged. Also applies background removal to the top ranked product.
         """
-        start_time = time.time()
-        keywords = item_context.get("keywords", "unknown")
-        logger.info(f"[ 📊 RANK ] Starting ranking for '{keywords}' with {len(results)} results")
+        
+        grid_start_time = None
         
         async with self._ranking_semaphore:
             try:
@@ -45,20 +43,23 @@ class ProductRankingService:
                 if not products_with_images:
                     logger.warning("No products with images found for grid creation")
                     return head[:top_k]
-
-                # Create product grid image
-                grid_start = time.time()
+                
+                grid_start_time = time.time()
                 try:
-                    img_bytes, public_url, filename = await create_product_grid_and_upload(products_with_images)
+                    # Extract keywords from item_context for the header
+                    ranking_keywords = item_context.get("keywords") if item_context else None
+                    img_bytes, public_url, filename = await create_product_grid_and_upload(
+                        products_with_images,
+                        ranking_keywords=ranking_keywords
+                    )
                     grid_data_uri = f"data:image/jpeg;base64,{base64.b64encode(img_bytes).decode('ascii')}"
-                    grid_time = time.time() - grid_start
-                    logger.info(f"[ 📊 RANK ] Grid created in {grid_time:.1f}s for '{keywords}'")
                 except Exception as grid_err:
                     logger.error(f"🖼️ GRID CREATION FAILED - Returning first {top_k} results unranked: {grid_err}")
                     return head[:top_k]
 
-                # Call centralized ranking flow
-                ai_start = time.time()
+                grid_end_time = time.time()
+                ai_start_time = time.time()
+                
                 try:
                     ratings = await self.openai_client.rank_products_flow(
                         user_data=user_data,    
@@ -68,32 +69,27 @@ class ProductRankingService:
                         thread_id=thread_id,
                         timeout=getattr(_config, "RANKING_TIMEOUT", None),
                     )
-                    ai_time = time.time() - ai_start
-                    logger.info(f"[ 📊 RANK ] AI ranking completed in {ai_time:.1f}s for '{keywords}'")
                 except Exception as ranking_err:
                     logger.warning(f"Failed to rank products: {ranking_err}")
                     return head[:top_k]
 
                 # Rank and sort results
-                sort_start = time.time()
                 sorted_indices = sorted(range(n), key=lambda i: (-ratings[i], i))
                 ranked_all: List[Dict[str, Any]] = []
                 for idx in sorted_indices:
                     product = head[idx].copy()
                     product["ranking"] = ratings[idx]
+                    product["original_index"] = idx
                     ranked_all.append(product)
                 final_ranked = ranked_all[:top_k]
 
-                # Optional background removal on top product
-                if final_ranked and getattr(_config, "BACKGROUND_REMOVAL_ENABLED", False) and final_ranked[0].get("imageUrl"):
-                    async with SupabaseBackgroundProcessor() as processor:
-                        final_ranked[0]["imageUrl"] = await processor.process_image(final_ranked[0]["imageUrl"])
 
-                # Final timing summary
-                total_time = time.time() - start_time
-                sort_time = time.time() - sort_start
-                logger.info(f"[ 📊 RANK ] ✅ Completed ranking for '{keywords}' in {total_time:.1f}s total (sort: {sort_time:.1f}s)")
-                
+
+                # Log timing information with correct measurements
+                grid_time = grid_end_time - grid_start_time
+                ai_time = time.time() - ai_start_time   
+                logger.info(f"Grid creation: {grid_time:.2f}s, AI: {ai_time:.2f}s")
+
                 return final_ranked
 
             except Exception as e:

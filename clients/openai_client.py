@@ -5,11 +5,12 @@ from typing import Dict, Any, List, Optional, Callable, Awaitable
 import _config
 import asyncio
 import json
+import httpx
 
 # Prompts
 from ai.prompts.generate_outfits import generate_outfit_system_prompt, generate_outfit_user_prompt
 from ai.prompts.modify_items import generate_outfit_modification_prompt
-from ai.prompts.product_ranking import build_product_ranking_prompt
+from ai.prompts.product_ranking_binary import build_product_ranking_prompt
 from ai.prompts.conversation_decisions import generate_outfit_decision_prompt, generate_chat_system_prompt
 from ai.prompts.virtual_tryon import generate_virtual_tryon_prompt
 
@@ -22,7 +23,6 @@ from ai.schemas.conversation_decision import generate_conversation_user_intent_s
 # Streaming/Parsing utils
 from utils.response_handler_utils import (
     process_streaming_outfit_response,
-    parse_final_outfit_json,
 )
 
 # Models
@@ -37,12 +37,43 @@ from _config.model_config import (
 
 logger = logging.getLogger(__name__)
 
+def get_product_ranking_tool(num_results: int) -> List[Dict[str, Any]]:
+    return [{
+  "type": "function",
+  "function": {
+    "name": "rank_products",
+    "description": "Return 1..10 ratings for each index 0..N-1.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "ratings": {
+          "type": "array",
+          "items": {"type": "integer", "minimum": 1, "maximum": 10},
+          "minItems": num_results, "maxItems": num_results
+        }
+      },
+      "required": ["ratings"],
+      "additionalProperties": False
+    }
+  }
+}]
 
 class OpenAIClient:
     """Simple centralized OpenAI client with unified cost tracking."""
     
     def __init__(self):
-        self.client = openai.AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        # Configure timeout for OpenAI client using httpx.Timeout
+        timeout = httpx.Timeout(
+            connect=_config.OPENAI_CONNECT_TIMEOUT,
+            read=_config.OPENAI_READ_TIMEOUT,
+            write=_config.OPENAI_WRITE_TIMEOUT,
+            pool=_config.OPENAI_POOL_TIMEOUT
+        )
+        
+        self.client = openai.AsyncOpenAI(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            timeout=timeout
+        )
     
     def _extract_tracking_params(self, kwargs: Dict[str, Any]) -> tuple[Optional[str], str]:
         """Extract tracking parameters from kwargs."""
@@ -89,34 +120,49 @@ class OpenAIClient:
 
     async def chat_completion(self, **kwargs) -> Dict[str, Any]:
         """Make a chat completion call with cost tracking."""
-        try:
-            # Extract tracking parameters
-            thread_id, category = self._extract_tracking_params(kwargs)
-            stream = kwargs.pop('stream', False)
-            
-            if stream:
-                # Return streaming response without cost tracking (tracked elsewhere)
-                response = await self.client.chat.completions.create(stream=True, **kwargs)
-                return {
-                    "stream": response,
-                    "thread_id": thread_id,
-                    "category": category
-                }
-            else:
-                # Normal non-streaming response
-                response = await self.client.chat.completions.create(**kwargs)
+        max_retries = 3
+        base_delay = 1.0
+        
+        for attempt in range(max_retries):
+            try:
+                # Extract tracking parameters
+                thread_id, category = self._extract_tracking_params(kwargs)
+                stream = kwargs.pop('stream', False)
                 
-                # Track cost
-                self._track_cost_safely(thread_id, category, response)
+                if stream:
+                    # Return streaming response without cost tracking (tracked elsewhere)
+                    response = await self.client.chat.completions.create(stream=True, **kwargs)
+                    return {
+                        "stream": response,
+                        "thread_id": thread_id,
+                        "category": category
+                    }
+                else:
+                    # Normal non-streaming response
+                    response = await self.client.chat.completions.create(**kwargs)
+                    
+                    # Track cost
+                    self._track_cost_safely(thread_id, category, response)
+                    
+                    return {
+                        "content": response.choices[0].message.content or "",
+                        "response": response,
+                    }
+                    
+            except Exception as e:
+                error_msg = str(e).lower()
+                is_retryable = any(keyword in error_msg for keyword in [
+                    "timeout", "connection", "peer closed", "incomplete", "network"
+                ])
                 
-                return {
-                    "content": response.choices[0].message.content or "",
-                    "response": response,
-                }
-                
-        except Exception as e:
-            logger.error(f"OpenAI chat completion failed: {e}")
-            raise
+                if attempt < max_retries - 1 and is_retryable:
+                    delay = base_delay * (2 ** attempt)  # Exponential backoff
+                    logger.warning(f"OpenAI chat completion attempt {attempt + 1} failed with retryable error: {e}. Retrying in {delay}s...")
+                    await asyncio.sleep(delay)
+                    continue
+                else:
+                    logger.error(f"OpenAI chat completion failed after {attempt + 1} attempts: {e}")
+                    raise
     
     async def image_edit(self, **kwargs) -> Dict[str, Any]:
         """Make an image edit call with cost tracking."""
@@ -134,64 +180,25 @@ class OpenAIClient:
     async def generate_outfits_flow(
         self,
         *,
+        item_db_ids: List[str],
         user_data: Dict[str, Any],
         thread_id: Optional[str] = None,
-        message_id: Optional[str] = None,
-        outfit_generation_service: Any = None,
+        conversation_history: List[Dict[str, Any]] = [],
+        streaming_callback: Callable[[str, str], None] = None,
+        outfit_history: List[Dict[str, Any]] = [],
     ) -> None:
-        """End-to-end outfit generation with streaming, JSON parsing, and struct formatting."""
-
         num_outfits = getattr(_config, "NUM_OUTFITS_TO_GENERATE", 1)
         num_items = getattr(_config, "NUM_ITEMS_PER_OUTFIT", 1)
-
-        logger.info(f"🔍 Generating outfits for thread {thread_id}")
-        logger.info(f"🔍 User data: {user_data}")
-        logger.info(f"🔍 Num outfits: {num_outfits}")
-        logger.info(f"🔍 Num items: {num_items}")
-        logger.info(f"🔍 Message ID: {message_id}")
-
-        # Create blank DB records upfront to get IDs
-        item_db_ids: Dict[str, str] = {}
-
-        for outfit_num in range(1, num_outfits + 1):
-            logger.info(f"🔧 Creating outfit {outfit_num} for message {message_id}")
-            outfit_id = outfit_generation_service.outfits_interface.create(
-                message_id=message_id,
-                name="",
-                description=""
-            )
-            
-            if not outfit_id:
-                logger.error(f"❌ Failed to create outfit {outfit_num} - outfit_id is None")
-                continue
-                
-            logger.info(f"✅ Created outfit {outfit_num} with ID: {outfit_id}")
-            
-            for item_num in range(1, num_items + 1):
-                logger.debug(f"🔧 Creating item {item_num} for outfit {outfit_id}")
-                item_id = outfit_generation_service.outfit_items_interface.create(
-                    outfit_id=outfit_id,
-                    type="unknown",
-                    keywords=""
-                )   
-
-                if not item_id:
-                    logger.error(f"❌ Failed to create item {item_num} for outfit {outfit_id} - item_id is None")
-                    continue
-                    
-                logger.debug(f"✅ Created item {item_num} with ID: {item_id}")
-                item_db_ids[f"outfit_{outfit_num}:item_{item_num}"] = item_id
-
-        logger.info(f"📊 Created {len(item_db_ids)} outfit items total: {list(item_db_ids.keys())}")
-        
-        if not item_db_ids:
-            logger.error("❌ No outfit items were created successfully - aborting outfit generation")
-            return
+        clothing_items = getattr(_config, "CLOTHING_ITEMS", [])
+        gender = (user_data or {}).get("gender")
 
         # Schema + prompts
-        schema = generate_outfit_schema(num_outfits, num_items, getattr(_config, "CLOTHING_ITEMS", []))
-        system_prompt = generate_outfit_system_prompt(num_items, getattr(_config, "CLOTHING_ITEMS", []), (user_data or {}).get("gender"))
-        user_prompt = generate_outfit_user_prompt(user_data, num_outfits)
+        schema = generate_outfit_schema(num_outfits, num_items, clothing_items)
+        system_prompt = generate_outfit_system_prompt(num_items, clothing_items, gender)
+        user_prompt = generate_outfit_user_prompt(user_data, num_outfits, conversation_history, outfit_history)
+
+        logger.info(f"SYSTEM PROMPT: {system_prompt}")
+        logger.info(f"USER PROMPT: {user_prompt}")
         
         messages = [
             {"role": "system", "content": system_prompt},
@@ -209,37 +216,34 @@ class OpenAIClient:
         )
 
         # Create early search callback with item IDs if we have them
-        early_search_callback = lambda keywords: outfit_generation_service.process_keywords_with_item_ids(
-            item_db_ids=item_db_ids,
+        original_callback = streaming_callback
+        
+        streaming_callback = lambda keywords, item_id: original_callback(
+            item_id=item_id,
             keywords=keywords,
             user_data=user_data,
             thread_id=thread_id,
         )
 
         # Process stream and parse
-        full_content = await process_streaming_outfit_response(
+        outfit_metadata = await process_streaming_outfit_response(
             stream_result["stream"],
-            num_outfits,
-            num_items,
-            early_search_callback=early_search_callback,
-        )
-
-        outfits_data = parse_final_outfit_json(full_content)
-
-        await outfit_generation_service.update_outfits_with_final_data(
             item_db_ids=item_db_ids,
-            parsed_outfits=outfits_data
+            _process_single_item_cb=streaming_callback,
         )
+
+
+        return outfit_metadata
 
     async def analyze_item_modifications_flow(
         self,
         *,
-        current_outfit_items: List[Dict[str, Any]],
+        existing_items: List[Dict[str, Any]],
         user_message: str,
         user_gender: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """LLM to propose updated search keywords per item needing modification."""
-        prompt = generate_outfit_modification_prompt(current_outfit_items, user_message, user_gender)
+        prompt = generate_outfit_modification_prompt(existing_items, user_message, user_gender)
 
         result = await self.chat_completion(
             model=ITEM_MODIFICATION["model"],
@@ -278,37 +282,61 @@ class OpenAIClient:
         thread_id: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> List[int]:
-        """LLM-only ranking: builds messages + schema, calls model, returns ratings list."""
+        """LLM-only ranking: builds messages + tool schema, calls model, returns ratings list."""
+        # Messages (set {"detail":"low"} inside build_product_ranking_prompt)
         messages = build_product_ranking_prompt(
             user_data,
             item_context,
             num_results,
             grid_image_data_uri=grid_image_data_uri,
         )
-        response_schema = generate_product_ratings_schema(num_results)
 
-        coro = self.chat_completion(
-            model=PRODUCT_RANKING["model"],
-            messages=messages,
-            response_format=response_schema,
-            thread_id=thread_id,
-            category="ranking",
-            timeout=timeout or getattr(_config, "RANKING_TIMEOUT", None),
-        )
-        result = await (asyncio.wait_for(coro, timeout=timeout) if timeout else coro)
+        
 
-        text = result.get("content", "")
+        # Tool schema sized to N
+        tools = [{
+            "type": "function",
+            "function": {
+                "name": "rank_products",
+                "description": "Return 1..10 ratings for each product index 0..N-1.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "ratings": {
+                            "type": "array",
+                            "items": {"type": "integer", "minimum": 1, "maximum": 10},
+                            "minItems": num_results, "maxItems": num_results
+                        }
+                    },
+                    "required": ["ratings"],
+                },
+            },
+        }]
+
+        resp = await self.chat_completion(
+                model=PRODUCT_RANKING["model"],
+                messages=messages,
+                tools=tools,
+                tool_choice={"type": "function", "function": {"name": "rank_products"}},
+                # temperature=0,
+                top_p=1,
+                # max_completion_tokens = 1000,
+                stream=False,
+                thread_id=thread_id,
+                category="ranking",
+                timeout=timeout or getattr(_config, "RANKING_TIMEOUT", None),
+            )
+        
+        resp_obj = resp["response"] if isinstance(resp, dict) and "response" in resp else resp
+
         try:
-            data = json.loads(text)
-        except Exception:
-            import re
-            m = re.search(r"\{.*\}", text, re.DOTALL)
-            data = json.loads(m.group(0)) if m else None
-        if not isinstance(data, dict) or not isinstance(data.get("ratings"), list):
-            raise ValueError("Failed to parse ratings from ranking response")
-        ratings = [int(x) for x in data["ratings"]]
-        if len(ratings) != num_results:
-            raise ValueError("Ratings length mismatch")
+            tc = resp_obj.choices[0].message.tool_calls[0]
+            args = json.loads(tc.function.arguments)
+            ratings = [int(x) for x in args["ratings"]]
+        except Exception as e:
+            raise ValueError(f"Failed to parse ratings. Raw: {resp}") from e
+
+        logger.info(f"PRODUCT RANKING RATINGS: {ratings}")
         return ratings
 
     async def generate_chat_response_flow(

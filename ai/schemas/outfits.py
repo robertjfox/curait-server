@@ -1,5 +1,40 @@
-from typing import List
+# The JSON schema created here has the following shape:
+# {
+#   "outfit_1": {
+#     "item_1": "string",
+#     "item_2": "string",
+#     ...
+#   },
+#   "outfit_2": {
+#     "item_1": "string",
+#     "item_2": "string",
+#     ...
+#   },
+#   ...
+#   "metadata": {
+#     "outfit_1": {
+#       "name": "string",
+#       "description": "string",
+#       "item_1": {
+#         "type": "string",
+#         "keywords": "string"
+#       },
+#       ...
+#     },
+#     "outfit_2": {
+#       "name": "string",
+#       "description": "string",
+#       "item_1": {
+#         "type": "string",
+#         "keywords": "string"
+#       },
+#       ...
+#     },
+#     ...
+#   }
+# }
 
+from typing import List
 
 def generate_outfit_schema(num_outfits: int, num_items: int, clothing_items: List[str]):
     # Keywords section - comes first for immediate search
@@ -12,7 +47,10 @@ def generate_outfit_schema(num_outfits: int, num_items: int, clothing_items: Lis
         
         for j in range(1, num_items + 1):
             item_key = f"item_{j}"
-            item_keywords[item_key] = {"type": "string"}
+            item_keywords[item_key] = {
+                "type": "string",
+                "description": "Space-separated keywords ONLY. Use spaces between words, NEVER commas, quotes, or special characters. Example: 'mens slim fit navy cotton chinos' NOT 'mens, slim, fit, navy, cotton, chinos'"
+            }
         
         keywords_properties[outfit_key] = {
             "type": "object", 
@@ -41,7 +79,10 @@ def generate_outfit_schema(num_outfits: int, num_items: int, clothing_items: Lis
                 "type": "object",
                 "properties": {
                     "type": {"type": "string", "enum": clothing_items},
-                    "keywords": {"type": "string"},
+                    "keywords": {
+                        "type": "string",
+                        "description": "Space-separated keywords ONLY. Use spaces between words, NEVER commas, quotes, or special characters. Example: 'mens slim fit navy cotton chinos' NOT 'mens, slim, fit, navy, cotton, chinos'"
+                    },
                 },
                 "required": ["type", "keywords"],
                 "additionalProperties": False,

@@ -18,11 +18,11 @@ def get_outfit_modification_schema() -> Dict[str, Any]:
                             "properties": {
                                 "type": {
                                     "type": "string",
-                                    "description": "The type of item to modify (e.g., 'tops', 'bottoms', 'footwear', 'accessories')"
+                                    "description": "The type of item to modify (e.g., 'outerwear', 'tops', 'dresses', 'bottoms', 'footwear',)"
                                 },
                                 "new_keywords": {
                                     "type": "string",
-                                    "description": "The new search keywords for this item"
+                                    "description": "Space-separated keywords ONLY. Use spaces between words, NEVER commas, quotes, or special characters. Example: 'mens slim fit navy cotton chinos' NOT 'mens, slim, fit, navy, cotton, chinos'"
                                 },
                                 "reasoning": {
                                     "type": "string",

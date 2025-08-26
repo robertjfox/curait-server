@@ -3,19 +3,19 @@ from typing import Any, Dict, List, Optional, TypeVar
 import httpx
 import re
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 T = TypeVar("T")
 
 
 
-def sanitize_keywords(keywords: Optional[str]) -> str:
-    """Sanitize user-provided keywords to avoid harming retrieval."""
-    return (keywords or "").replace(",", " ").strip()
-
-
 def build_query(keywords: Optional[str]) -> str:
-    """Build a consistent query prefix to bias toward higher quality items."""
-    return f"{sanitize_keywords(keywords)}"
+    """Sanitize and build a consistent query prefix to bias toward higher quality items."""
+    sanitized_keywords = (keywords or "").replace(",", " ").strip()
+    return f"{sanitized_keywords}"
 
 
 def cap_results(results: Optional[List[T]], cap: int) -> List[T]:
@@ -43,6 +43,25 @@ def create_semaphore(max_concurrency: int) -> asyncio.Semaphore:
 
 
 
+def filter_price_min_max(results: List[Dict[str, Any]], min_price: Optional[int], max_price: Optional[int]) -> List[Dict[str, Any]]:
+    filtered_results = []
+    for result in results:
+        price = result.get("price")
+
+        if price is None:
+            continue
+        
+        price_float = float(price.replace("$", "").replace(",", ""))
+        
+        if min_price and price_float < min_price:
+            continue
+        
+        if max_price and price_float > max_price:
+            continue
+        
+        filtered_results.append(result)
+    
+    return filtered_results
 
 
 def filter_blocked_sources(results: List[Dict[str, Any]], blocked_sources: List[str]) -> List[Dict[str, Any]]:
@@ -143,26 +162,42 @@ def filter_by_gender(results: List[Dict[str, Any]], user_gender: Optional[str]) 
     return filtered_results
 
 
+# needs "reviews" > 9 && "rating" > 4
+def filter_by_rating(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    filtered_results = []
+    for result in results:
+        reviews = result.get("reviews")
+        rating = result.get("rating")
+
+        if not reviews or not rating:
+            continue
+
+        if reviews > 9 and rating > 4:
+            filtered_results.append(result)
+
+    return filtered_results
+
 # Normalization helpers for different providers
 
-def normalize_serpapi_item(item: Dict[str, Any]) -> Dict[str, Any]:
-    # Ensure price is always a string, provide fallback for None values
-    price = item.get("price")
-    if price is None:
-        price = "Price not available"
-    elif not isinstance(price, str):
-        price = str(price)
-    
-    return {
-        "title": item.get("title"),
-        "price": price,
-        # SerpApi uses 'product_link' not 'link'
-        "link": item.get("product_link") or item.get("link"),
-        # Prefer thumbnail over serpapi_thumbnail, fallback to None
-        "imageUrl": item.get("thumbnail") or item.get("serpapi_thumbnail"),
-        "source": item.get("source"),
-    }
-
-
 def normalize_serpapi_results(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    return [normalize_serpapi_item(it) for it in items or []] 
+    def normalize_serpapi_item(item: Dict[str, Any]) -> Dict[str, Any]:
+        # Ensure price is always a string, provide fallback for None values
+        price = item.get("price")
+        if price is None:
+            price = "Price not available"
+        elif not isinstance(price, str):
+            price = str(price)
+        
+        return {
+            "title": item.get("title"),
+            "price": price,
+            # SerpApi uses 'product_link' not 'link'
+            "link": item.get("product_link") or item.get("link"),
+            # Prefer thumbnail over serpapi_thumbnail, fallback to None
+            "imageUrl": item.get("thumbnail") or item.get("serpapi_thumbnail"),
+            "source": item.get("source"),
+            "rating": item.get("rating"),
+            "reviews": item.get("reviews"),
+        }
+
+    return [normalize_serpapi_item(it) for it in items or []]

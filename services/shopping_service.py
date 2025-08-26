@@ -1,6 +1,9 @@
 import os
 import logging
 from typing import Dict, Any, List, Optional
+from clients.shopping.serper_client import SerperShoppingClient
+from clients.shopping.serpapi_client import SerpApiShoppingClient
+
 
 logger = logging.getLogger(__name__)
 
@@ -16,14 +19,12 @@ class ShoppingService:
         # Initialize the appropriate client
         if self._provider == "serpapi":
             try:
-                from clients.shopping.serpapi_client import SerpApiShoppingClient
                 self._client = SerpApiShoppingClient(max_concurrency=max_concurrency)
             except ImportError:
                 logger.warning("SerpApi client not available, falling back to Serper")
                 self._provider = "serper"
         
         if self._provider == "serper" or self._client is None:
-            from clients.shopping.serper_client import SerperShoppingClient
             self._client = SerperShoppingClient(max_concurrency=max_concurrency)
     
     async def search_for_keywords(

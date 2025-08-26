@@ -22,26 +22,29 @@ GPT_IMAGE_1 = "gpt-image-1"
 OUTFIT_GENERATION = {
     # "model": GPT_4O_MINI,
     # "model": GPT_4O,
+    # "model": GPT_O4_MINI,
+    # "model": GPT_5,
     "model": GPT_5_MINI,
+    # "model": GPT_5_NANO,
     # "model": GPT_O4_MINI
 }
 
 # For ranking and scoring product search results with visual analysis
 # Category: "product_ranking"
 PRODUCT_RANKING = {
-    "model": GPT_4O_MINI,
+    # "model": GPT_4O_MINI,
     # "model": GPT_O4_MINI,
     # "model": GPT_4O,
     # "model": GPT_5_MINI,
-    # "model": GPT_5_NANO,
+    "model": GPT_5_NANO,
 }
 
 # For generating virtual try-on images
 VIRTUAL_TRY_ON = {
     "model": GPT_IMAGE_1,
     "size": "1024x1536",
-    # "input_fidelity": "low",
-    "input_fidelity": "high",
+    "input_fidelity": "low",
+    # "input_fidelity": "high",
     "quality": "low",
     # "quality": "medium",
     "n": 1,

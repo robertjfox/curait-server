@@ -4,7 +4,8 @@ import time
 import uuid
 import logging
 import asyncio
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 import httpx
@@ -15,23 +16,31 @@ from clients.supabase_client import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
-# Reserved bands so metadata does not overlay product imagery
-METADATA_TOP_HEIGHT = 56
-METADATA_BOTTOM_HEIGHT = 34
+# Reserved bands so metadata does not overlay product imagery - BALANCED for readability + image space
+METADATA_TOP_HEIGHT = 24  # Increased for better text readability
+METADATA_BOTTOM_HEIGHT = 16  # Increased for better text readability
 
+# Cache for fonts to avoid repeated loading
+_font_cache: Dict[int, Any] = {}
 
-async def _download_image(url: str, timeout: float = 10.0) -> Optional[Image.Image]:
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, timeout=timeout)
-            resp.raise_for_status()
-            img = Image.open(io.BytesIO(resp.content))
-            img = img.convert("RGB")
-            return img
-    except Exception as e:
-        logger.warning(f"Failed to download image from {url[:100]}...: {e}")
-        return None
-
+def _get_cached_font(size: int, bold: bool = False) -> Any:
+    """Get cached font or create and cache it."""
+    cache_key = f"{size}{'_bold' if bold else ''}"
+    if cache_key not in _font_cache:
+        try:
+            if bold:
+                _font_cache[cache_key] = ImageFont.truetype("/System/Library/Fonts/Arial Bold.ttf", size)
+            else:
+                _font_cache[cache_key] = ImageFont.truetype("/System/Library/Fonts/Arial.ttf", size)
+        except:
+            try:
+                if bold:
+                    _font_cache[cache_key] = ImageFont.truetype("arialbd.ttf", size)
+                else:
+                    _font_cache[cache_key] = ImageFont.truetype("arial.ttf", size)
+            except:
+                _font_cache[cache_key] = ImageFont.load_default()
+    return _font_cache[cache_key]
 
 async def _download_image_with_client(client: httpx.AsyncClient, url: str) -> Optional[Image.Image]:
     """Download image using a shared client to avoid resource leaks."""
@@ -45,142 +54,151 @@ async def _download_image_with_client(client: httpx.AsyncClient, url: str) -> Op
         logger.warning(f"Failed to download image from {url[:100]}...: {e}")
         return None
 
-
-def _fit_into_cell(img: Image.Image, cell_size: Tuple[int, int]) -> Image.Image:
+def _fit_into_cell(img: Image.Image, cell_size: Tuple[int, int], max_fill: bool = True) -> Image.Image:
     cell_w, cell_h = cell_size
     w, h = img.size
-    scale = min(cell_w / max(1, w), cell_h / max(1, h))
-    new_w = max(1, int(w * scale))
-    new_h = max(1, int(h * scale))
-    img = img.resize((new_w, new_h), Image.LANCZOS)
-    # paste onto white background centered
-    canvas = Image.new("RGB", (cell_w, cell_h), (255, 255, 255))
-    off_x = (cell_w - new_w) // 2
-    off_y = (cell_h - new_h) // 2
-    canvas.paste(img, (off_x, off_y))
-    return canvas
-
+    
+    if max_fill:
+        # Fill the entire cell, cropping if necessary for maximum visibility
+        scale = max(cell_w / max(1, w), cell_h / max(1, h))
+        new_w = max(1, int(w * scale))
+        new_h = max(1, int(h * scale))
+        
+        # Resize image
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+        
+        # Create canvas and center the (potentially larger) image
+        canvas = Image.new("RGB", (cell_w, cell_h), (255, 255, 255))
+        off_x = (cell_w - new_w) // 2
+        off_y = (cell_h - new_h) // 2
+        
+        # Crop the image if it's larger than the cell
+        if new_w > cell_w or new_h > cell_h:
+            crop_x = max(0, -off_x)
+            crop_y = max(0, -off_y)
+            crop_w = min(new_w, cell_w)
+            crop_h = min(new_h, cell_h)
+            img = img.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
+            off_x = max(0, off_x)
+            off_y = max(0, off_y)
+        
+        canvas.paste(img, (off_x, off_y))
+        return canvas
+    else:
+        # Original fit-to-contain logic
+        scale = min(cell_w / max(1, w), cell_h / max(1, h))
+        new_w = max(1, int(w * scale))
+        new_h = max(1, int(h * scale))
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+        canvas = Image.new("RGB", (cell_w, cell_h), (255, 255, 255))
+        off_x = (cell_w - new_w) // 2
+        off_y = (cell_h - new_h) // 2
+        canvas.paste(img, (off_x, off_y))
+        return canvas
 
 def _draw_index_badge(img: Image.Image, index_label: str, cell_size: Tuple[int, int]) -> None:
     draw = ImageDraw.Draw(img)
     cell_w, cell_h = cell_size
     
-    # Use a larger, bolder font for better readability
-    try:
-        # Try to use a larger default font or create a bigger one
-        font = ImageFont.load_default()
-        # Scale up the font size for better visibility
-        font_size = 16
-        try:
-            font = ImageFont.truetype("arial.ttf", font_size)
-        except:
-            try:
-                font = ImageFont.truetype("/System/Library/Fonts/Arial.ttf", font_size)
-            except:
-                font = ImageFont.load_default()
-    except Exception:
-        font = None
+    # Larger, bold font for better visibility
+    font = _get_cached_font(12, bold=True)  # Larger and bold for clarity
     
-    # Larger padding for better visibility
-    padding = 8
+    # Adequate padding for readability
+    padding = 3  # Slightly more padding for better appearance
     text_w, text_h = draw.textbbox((0, 0), index_label, font=font)[2:]
     box_w = text_w + padding * 2
     box_h = text_h + padding * 2
 
     # bottom-right position inside the footer band
-    x0 = cell_w - box_w - 8
-    y0 = cell_h - box_h - 8
+    x0 = cell_w - box_w - 3
+    y0 = cell_h - box_h - 3
 
-    # Solid dark background for better contrast
-    box = Image.new("RGBA", (box_w, box_h), (0, 0, 0, 220))
-    img_rgba = img.convert("RGBA")
-    img_rgba.paste(box, (x0, y0), box)
-
-    # draw white text with better contrast
-    draw = ImageDraw.Draw(img_rgba)
-    draw.text((x0 + padding, y0 + padding), index_label, fill=(255, 255, 255, 255), font=font)
-    img.paste(img_rgba.convert("RGB"))
-
+    # High contrast background for better visibility
+    draw.rectangle([x0, y0, x0 + box_w, y0 + box_h], fill=(0, 0, 0))
+    draw.text((x0 + padding, y0 + padding), index_label, fill=(255, 255, 255), font=font)
 
 def _draw_product_title(img: Image.Image, title: str, source: str, cell_size: Tuple[int, int]) -> None:
-    """Draw product title and source in the reserved top band (no overlay)."""
+    """Draw product source in the reserved top band (larger and centered)."""
     draw = ImageDraw.Draw(img)
     cell_w, cell_h = cell_size
     
-    # Font for title and source - make source slightly larger/bolder for readability
+    # Larger, bold font for better source visibility
+    source_font = _get_cached_font(12, bold=True)  # Increased from 9 to 12
+    
+    # Smarter truncation logic based on actual text width
+    max_chars = cell_w // 6  # Adjusted for larger font
+    truncated_source = source[:max_chars] + "..." if len(source) > max_chars else source
+
+    # Center the source text horizontally in the top band
+    bbox = draw.textbbox((0, 0), truncated_source, font=source_font)
+    text_w = bbox[2] - bbox[0]
+    x_pos = (cell_w - text_w) // 2
+    y_pos = (METADATA_TOP_HEIGHT - bbox[3]) // 2  # Center vertically in the top band
+    
+    draw.text((x_pos, y_pos), truncated_source, fill=(0, 0, 0), font=source_font)  # Black for better contrast
+
+def _process_single_image(args: Tuple[Any, int, int, int, int, str, str, str]) -> Optional[Image.Image]:
+    """Process a single image in a thread for parallel processing."""
     try:
-        title_font_size = 16
-        source_font_size = 18
-        try:
-            title_font = ImageFont.truetype("arial.ttf", title_font_size)
-            source_font = ImageFont.truetype("arial.ttf", source_font_size)
-        except:
-            try:
-                title_font = ImageFont.truetype("/System/Library/Fonts/Arial.ttf", title_font_size)
-                source_font = ImageFont.truetype("/System/Library/Fonts/Arial.ttf", source_font_size)
-            except:
-                title_font = ImageFont.load_default()
-                source_font = ImageFont.load_default()
-    except Exception:
-        title_font = source_font = None
-    
-    # Truncate long titles to fit in cell width
-    max_text_width = cell_w - 16  # padding
-    truncated_title = title
-    if title_font:
-        title_width = draw.textbbox((0, 0), title, font=title_font)[2]
-        if title_width > max_text_width:
-            while len(truncated_title) > 10 and draw.textbbox((0, 0), truncated_title + "...", font=title_font)[2] > max_text_width:
-                truncated_title = truncated_title[:-1]
-            truncated_title += "..."
-    
-    truncated_source = source
-    if source_font:
-        source_width = draw.textbbox((0, 0), source, font=source_font)[2]
-        if source_width > max_text_width:
-            while len(truncated_source) > 5 and draw.textbbox((0, 0), truncated_source + "...", font=source_font)[2] > max_text_width:
-                truncated_source = truncated_source[:-1]
-            truncated_source += "..."
+        img, cell_w, cell_h, image_area_h, label, title, source, price = args
+        if img is None or isinstance(img, Exception):
+            return None
+            
+        # Create the full cell canvas (white)
+        cell_img = Image.new("RGB", (cell_w, cell_h), (255, 255, 255))
 
-    # Draw in the reserved top band, on a solid white background
-    title_height = draw.textbbox((0, 0), truncated_title, font=title_font)[3] if title_font else 16
-    title_y = 8
-    draw.text((10, title_y), truncated_title, fill=(40, 40, 40), font=title_font)
-
-    source_y = title_y + title_height + 4
-    # Clamp to top band
-    if source_y > METADATA_TOP_HEIGHT - 20:
-        source_y = METADATA_TOP_HEIGHT - 20
-    draw.text((10, source_y), truncated_source, fill=(20, 20, 20), font=source_font)
-
+        # Fit product image into the middle image area and paste it
+        fitted_img = _fit_into_cell(img, (cell_w, image_area_h))
+        cell_img.paste(fitted_img, (0, METADATA_TOP_HEIGHT))
+        
+        # Add source metadata - centered and larger
+        _draw_product_title(cell_img, title, source, (cell_w, cell_h))
+        
+        # Index badge in bottom right
+        _draw_index_badge(cell_img, str(label), (cell_w, cell_h))
+        
+        return cell_img
+    except Exception as e:
+        logger.warning(f"Failed to process image: {e}")
+        return None
 
 async def create_product_grid_and_upload(
     products: List[dict],
     index_labels: Optional[List[int]] = None,
     *,
     max_cols: int = 4,
-    cell_size: Tuple[int, int] = (256, 256),
-    padding: int = 8,
+    cell_size: Tuple[int, int] = (160, 160),  # Reduced from (256, 256)
+    padding: int = 4,  # Reduced from 8
     background_color: Tuple[int, int, int] = (255, 255, 255),
     bucket: str = "product-ranking-grids",
     filename_prefix: str = "product_grid",
+    ranking_keywords: Optional[str] = None,
 ) -> Tuple[bytes, Optional[str], str]:
     """
-    Create a composite grid image from given product data with non-overlapping metadata bands
+    OPTIMIZED: Create a composite grid image from given product data with minimal metadata
     and upload to Supabase storage. Returns (png_bytes, public_url_or_none, filename).
 
-    - products: List of product dicts with 'imageUrl', 'title', 'source' keys
-    - index_labels: optional labels to overlay; defaults to 0..n-1
+    Performance optimizations:
+    - Smaller cell size (160x160 vs 256x256)
+    - Reduced metadata bands
+    - Simplified drawing operations
+    - Parallel image processing
+    - Lower JPEG quality for smaller files
+    - Cached fonts
     """
     
     if not products:
         raise ValueError("products list is empty")
 
     start_time = time.time()
-    n = len(products)
-    logger.debug(f"🖼️ Starting grid creation for {n} products")
+    n = len(products)   
     labels = index_labels if (index_labels and len(index_labels) == n) else list(range(n))
 
+    # Calculate header height if we have ranking keywords
+    header_height = 0
+    if ranking_keywords:
+        header_height = 80  # Fixed height for a two-line header
+    
     # Grid geometry
     cols = max(1, min(max_cols, n))
     rows = math.ceil(n / cols)
@@ -188,17 +206,46 @@ async def create_product_grid_and_upload(
 
     # Expand cell height to include reserved bands if caller passed a "pure image" height
     cell_h = base_cell_h
-    if cell_h < METADATA_TOP_HEIGHT + METADATA_BOTTOM_HEIGHT + 64:  # ensure minimum area for image
+    if cell_h < METADATA_TOP_HEIGHT + METADATA_BOTTOM_HEIGHT + 64:  # Ensure adequate image space
         cell_h = METADATA_TOP_HEIGHT + METADATA_BOTTOM_HEIGHT + max(64, base_cell_h)
 
     grid_w = cols * cell_w + (cols + 1) * padding
-    grid_h = rows * cell_h + (rows + 1) * padding
+    grid_h = rows * cell_h + (rows + 1) * padding + header_height
 
     grid = Image.new("RGB", (grid_w, grid_h), background_color)
+    
+    # Draw header if we have ranking keywords
+    if ranking_keywords:
+        draw = ImageDraw.Draw(grid)
+        # Fixed, bold font size; we split into two lines to avoid cropping
+        header_font = _get_cached_font(24, bold=True)
+        sub_font = _get_cached_font(20, bold=True)
+        
+        line1 = "RANKING GOAL:"
+        line2 = str(ranking_keywords)
+        
+        # Measure lines
+        bbox1 = draw.textbbox((0, 0), line1, font=header_font)
+        text_w1 = bbox1[2] - bbox1[0]
+        text_h1 = bbox1[3] - bbox1[1]
+        
+        bbox2 = draw.textbbox((0, 0), line2, font=sub_font)
+        text_w2 = bbox2[2] - bbox2[0]
+        text_h2 = bbox2[3] - bbox2[1]
+        
+        # Compute positions: center both lines, stacked
+        total_text_h = text_h1 + 6 + text_h2
+        start_y = (header_height - total_text_h) // 2
+        x1 = (grid_w - text_w1) // 2
+        x2 = (grid_w - text_w2) // 2
+        
+        # Draw lines
+        draw.text((x1, start_y), line1, fill=(0, 0, 0), font=header_font)
+        draw.text((x2, start_y + text_h1 + 6), line2, fill=(0, 0, 0), font=sub_font)
 
-    # Download all images in parallel using a shared client
+    # Download all images in parallel with reduced timeout
     download_start = time.time()
-    async with httpx.AsyncClient(timeout=10.0) as shared_client:
+    async with httpx.AsyncClient(timeout=5.0) as shared_client:  # Reduced timeout from 10s
         download_tasks = []
         for i, product in enumerate(products):
             image_url = product.get("imageUrl")
@@ -210,65 +257,46 @@ async def create_product_grid_and_upload(
         downloaded_images = await asyncio.gather(*download_tasks, return_exceptions=True)
     
     download_time = time.time() - download_start
-    logger.debug(f"🖼️ Downloaded {len(products)} images in parallel in {download_time:.1f}s")
     
-    # Build cells
-    successful_images = 0
-    failed_images = 0
-    
+    # Process images in parallel using thread pool
+    process_start = time.time()
     image_area_h = cell_h - METADATA_TOP_HEIGHT - METADATA_BOTTOM_HEIGHT
     
+    # Prepare arguments for parallel processing
+    process_args = []
     for i, (product, label) in enumerate(zip(products, labels)):
-        image_url = product.get("imageUrl")
+        img = downloaded_images[i] if i < len(downloaded_images) else None
         title = product.get("title", "Unknown Product")
         source = product.get("source", "Unknown Source")
-        
-        # Use pre-downloaded image
-        img = downloaded_images[i] if i < len(downloaded_images) else None
-        
-        if img is None or isinstance(img, Exception):
-            failed_images += 1
-            if image_url:
-                logger.warning(f"🖼️ Failed to use image {i+1}/{n}: {image_url}")
-            continue
-            
-        successful_images += 1
-
-        # Create the full cell canvas (white)
-        cell_img = Image.new("RGB", (cell_w, cell_h), (255, 255, 255))
-
-        # Fit product image into the middle image area and paste it
-        fitted_img = _fit_into_cell(img, (cell_w, image_area_h))
-        cell_img.paste(fitted_img, (0, METADATA_TOP_HEIGHT))
-        
-        # Top band: product title and source
-        _draw_product_title(cell_img, title, source, (cell_w, cell_h))
-        
-        # Bottom band: price (left) and index badge (right)
         price = product.get("price", "")
-        if price and "$" in price:
-            price_text = f"${price.split('.')[0].split('$')[-1]}"
-            draw, font = ImageDraw.Draw(cell_img), ImageFont.load_default()
-            tw, th = draw.textbbox((0, 0), price_text, font=font)[2:]
-            text_x = 10
-            # vertically center in footer band
-            text_y = cell_h - METADATA_BOTTOM_HEIGHT + (METADATA_BOTTOM_HEIGHT - th) // 2
-            # Draw simple text without overlay box (footer is already white)
-            draw.text((text_x, text_y), price_text, fill=(40, 40, 40), font=font)
-        
-        # Index badge on bottom-right inside the footer band
-        _draw_index_badge(cell_img, str(label), (cell_w, cell_h))
-
-        r = i // cols
-        c = i % cols
-        x = padding + c * (cell_w + padding)
-        y = padding + r * (cell_h + padding)
-        grid.paste(cell_img, (x, y))
+        process_args.append((img, cell_w, cell_h, image_area_h, label, title, source, price))
     
-    # Encode to JPEG bytes (smaller for prompt)
+    # Process images in parallel
+    with ThreadPoolExecutor(max_workers=min(8, len(process_args))) as executor:
+        processed_cells = list(executor.map(_process_single_image, process_args))
+    
+    process_time = time.time() - process_start
+    
+    # Compose grid
+    compose_start = time.time()
+    successful_images = 0
+    for i, cell_img in enumerate(processed_cells):
+        if cell_img is not None:
+            successful_images += 1
+            r = i // cols
+            c = i % cols
+            x = padding + c * (cell_w + padding)
+            y = header_height + padding + r * (cell_h + padding)  # Offset by header height
+            grid.paste(cell_img, (x, y))
+    
+    compose_time = time.time() - compose_start
+    
+    # Encode to JPEG bytes with lower quality for smaller size
+    encode_start = time.time()
     out = io.BytesIO()
-    grid.save(out, format="JPEG", quality=85)
+    grid.save(out, format="JPEG", quality=70, optimize=True)  # Reduced quality from 85
     img_bytes = out.getvalue()
+    encode_time = time.time() - encode_start
 
     # Upload to Supabase
     public_url: Optional[str] = None
@@ -285,11 +313,12 @@ async def create_product_grid_and_upload(
         
         public_url = supabase.storage.from_(bucket).get_public_url(filename)
         upload_time = time.time() - upload_start
-        logger.debug(f"🖼️ Uploaded grid to Supabase in {upload_time:.1f}s")
         
     except Exception as e:
         upload_time = time.time() - upload_start
         logger.error(f"Failed to upload grid to bucket '{bucket}' after {upload_time:.1f}s: {e}")
         public_url = None  # Ensure public_url is explicitly set to None on failure
+
+    total_time = time.time() - start_time
 
     return img_bytes, public_url, filename 

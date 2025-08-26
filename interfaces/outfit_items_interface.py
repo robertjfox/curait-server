@@ -128,9 +128,3 @@ class OutfitItemsInterface:
             return []
 
 
-        """Delete all items for an outfit."""
-        try:
-            self._supabase.table(self._table).delete().eq("outfit_id", outfit_id).execute()
-            return True
-        except Exception:
-            return False 

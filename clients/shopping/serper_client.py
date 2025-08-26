@@ -12,6 +12,7 @@ from utils.search_client_utils import (
     create_semaphore,
     filter_blocked_sources,
     filter_by_gender,
+    filter_price_min_max,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,10 @@ class SerperShoppingClient:
             query = build_query(keywords)
 
             # add price min max to the end of the query like $100 - $200
-            query = f"{query} ${_config.SHOPPING_MIN_PRICE} - ${_config.SHOPPING_MAX_PRICE}"
+            # query = f"{query} ${_config.SHOPPING_MIN_PRICE} - ${_config.SHOPPING_MAX_PRICE}"
+
+            # add "new" to the end of the query
+            query = f"{query} new"
 
             # Request the configured number from Serper
             num_to_request = max(1, _config.SHOPPING_RESULTS_TO_FETCH)
@@ -76,7 +80,8 @@ class SerperShoppingClient:
                 # Apply source filtering to ALL results
                 shopping_results_filtered = filter_blocked_sources(shopping_results_full, _config.BLOCKED_SOURCES)
                 shopping_results_filtered = filter_by_gender(shopping_results_filtered, user_gender)
-                
+                # shopping_results_filtered = filter_price_min_max(shopping_results_filtered, _config.SHOPPING_MIN_PRICE, _config.SHOPPING_MAX_PRICE)
+
                 # Then cap to what we intend to rank
                 cap = max(_config.SHOPPING_RESULTS_TO_RANK, 1)
                 shopping_results = cap_results(shopping_results_filtered, cap)

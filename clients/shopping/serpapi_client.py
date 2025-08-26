@@ -4,9 +4,7 @@ from typing import Any, Dict, List, Optional
 import logging
 import time
 import httpx
-import json
 import random
-from pathlib import Path
 
 import _config
 from utils.search_client_utils import (
@@ -17,11 +15,10 @@ from utils.search_client_utils import (
     normalize_serpapi_results,
     filter_blocked_sources,
     filter_by_gender,
+    filter_by_rating,
 )
 
-
 logger = logging.getLogger(__name__)
-
 
 class SerpApiShoppingClient:
     def __init__(self, max_concurrency: int | None = None):
@@ -55,7 +52,7 @@ class SerpApiShoppingClient:
                 "num": num_to_fetch,
                 "min_price": getattr(_config, "SHOPPING_MIN_PRICE"),
                 "max_price": getattr(_config, "SHOPPING_MAX_PRICE"),
-                "json_restrictor": "shopping_results[].{title, product_link, price, source, thumbnail}"
+                "json_restrictor": "shopping_results[].{title, product_link, price, source, thumbnail, rating, reviews}"
             }
 
             max_attempts = 3
@@ -71,25 +68,14 @@ class SerpApiShoppingClient:
                     # Track search cost
                     _config.cost_logger.track_search(thread_id=thread_id, provider="serpapi")
                     
-                    # Write full response to JSON file (overwrites each time)
-                    project_root = Path(__file__).parent.parent  # Go up from shopping/ to project root
-                    output_dir = project_root / "testing" / "output"
-                    output_dir.mkdir(parents=True, exist_ok=True)
-                    debug_file = output_dir / "serpapi_response_debug.json"
-                    try:
-                        with open(debug_file, 'w', encoding='utf-8') as f:
-                            json.dump(data, f, indent=2, ensure_ascii=False)
-                    except Exception as write_err:
-                        logger.warning("Failed to write SerpApi debug file: %s", write_err)
-                    
                     items = data.get("shopping_results", []) or data.get("inline_shopping_results", [])
 
-                    # Normalize ALL results first
                     normalized = normalize_serpapi_results(items)
                     
                     # Apply source filtering to ALL results
                     normalized_filtered = filter_blocked_sources(normalized, _config.BLOCKED_SOURCES)
                     normalized_filtered = filter_by_gender(normalized_filtered, user_gender)
+                    normalized_filtered = filter_by_rating(normalized_filtered) 
                     
                     # Then cap to what we intend to rank
                     cap = max(_config.SHOPPING_RESULTS_TO_RANK, 1)
@@ -97,6 +83,14 @@ class SerpApiShoppingClient:
 
                     duration = time.time() - start_time
                     logger.info("%d results | %dms | '%s'", len(items), int(duration * 1000), query)
+
+
+                    # if len(normalized_capped) < 4:
+                    #     logger.warning("Not enough search results, removing last keyword and trying again")
+                    #     keywords = keywords.split(" ")[:-1]
+                    #     keywords = " ".join(keywords)
+                    #     return await self.search_item(keywords, user_gender, thread_id)
+
                     return normalized_capped
 
                 except Exception as e:
