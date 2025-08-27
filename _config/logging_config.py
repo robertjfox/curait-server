@@ -95,7 +95,8 @@ class ColoredFormatter(logging.Formatter):
                 message = message[6:].strip()
             return f"{color}{message}{reset}"
         
-        return f"{color}[{prefix}] {message}{reset}"
+        # Disable prefix for now - just return colored message
+        return f"{color}{message}{reset}"
 
 
 def setup_logging(level=logging.INFO):
@@ -111,10 +112,16 @@ def setup_logging(level=logging.INFO):
     )
     
     # Silence noisy third-party loggers by default
-    for noisy_logger in ("httpx", "httpcore", "openai", "urllib3", "insightface", "onnxruntime", "opencv", "cv2"):
+    # Note: We silence "openai._base_client" but NOT "clients.openai_client" 
+    for noisy_logger in ("httpx", "httpcore", "openai._base_client", "openai.resources", "urllib3", "insightface", "onnxruntime", "opencv", "cv2"):
         nl = logging.getLogger(noisy_logger)
         nl.setLevel(logging.WARNING)
         nl.propagate = False
+    
+    # Make sure our openai client logger works
+    openai_client_logger = logging.getLogger('clients.openai_client')
+    openai_client_logger.setLevel(level)
+    openai_client_logger.propagate = True
 
 
 def test_log_prefixes():

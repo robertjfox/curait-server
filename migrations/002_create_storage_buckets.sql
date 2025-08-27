@@ -8,5 +8,6 @@ VALUES
     ('product-ranking-grids', 'product-ranking-grids', true),
     ('vton-image-input-grid', 'vton-image-input-grid', true),
     ('processed-bg-removal-imgs', 'processed-bg-removal-imgs', true),
-    ('user-selfies', 'user-selfies', true)
+    ('user-selfies', 'user-selfies', true),
+    ('outfit-flatlay-images', 'outfit-flatlay-images', true)
 ON CONFLICT (id) DO NOTHING; 

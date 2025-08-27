@@ -1,8 +1,7 @@
 import os
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import logging
-import time
 import httpx
 import random
 
@@ -33,14 +32,27 @@ class SerpApiShoppingClient:
             await self._client.aclose()
             self._client = None
 
-    async def search_item(self, keywords: str, user_gender: str, thread_id: str | None = None) -> List[Dict[str, Any]]:
+    async def search_item(
+            self, 
+            keywords: str, 
+            user_gender: str, 
+            thread_id: str | None = None, 
+            min_price: int | None = _config.SHOPPING_MIN_PRICE, 
+            max_price: int | None = _config.SHOPPING_MAX_PRICE,
+            skip_rating_filter: bool = False,
+            ) -> Tuple[List[Dict[str, Any]], int]:
+
         """Search for a single item using keywords, returns normalized shopping results"""
         async with self._sem:
             assert self._client is not None, "SerpApiShoppingClient is closed"
 
             # Build query and payload
             query = build_query(keywords)
-            num_to_fetch = max(_config.SHOPPING_RESULTS_TO_FETCH, 1)
+
+            # testing - add new at the end of the query
+            query += " new"
+
+            num_to_fetch = _config.SHOPPING_RESULTS_TO_FETCH
 
             params = {
                 "api_key": self.api_key,
@@ -50,17 +62,17 @@ class SerpApiShoppingClient:
                 "hl": "en",
                 "location": "New York, New York, United States",
                 "num": num_to_fetch,
-                "min_price": getattr(_config, "SHOPPING_MIN_PRICE"),
-                "max_price": getattr(_config, "SHOPPING_MAX_PRICE"),
+                "min_price": min_price,
+                "max_price": max_price,
                 "json_restrictor": "shopping_results[].{title, product_link, price, source, thumbnail, rating, reviews}"
             }
 
-            max_attempts = 3
+            max_attempts = 2
             base_delay = 0.5
 
             for attempt in range(1, max_attempts + 1):
+
                 try:
-                    start_time = time.time()
                     resp = await self._client.get(self.base_url, params=params)
                     resp.raise_for_status()
                     data = resp.json()
@@ -69,33 +81,50 @@ class SerpApiShoppingClient:
                     _config.cost_logger.track_search(thread_id=thread_id, provider="serpapi")
                     
                     items = data.get("shopping_results", []) or data.get("inline_shopping_results", [])
+                    unfiltered_results_length = len(items)
 
-                    normalized = normalize_serpapi_results(items)
+                    items = normalize_serpapi_results(items)
                     
                     # Apply source filtering to ALL results
-                    normalized_filtered = filter_blocked_sources(normalized, _config.BLOCKED_SOURCES)
-                    normalized_filtered = filter_by_gender(normalized_filtered, user_gender)
-                    normalized_filtered = filter_by_rating(normalized_filtered) 
+                    # items = filter_blocked_sources(items, _config.BLOCKED_SOURCES)
+                    items = filter_by_gender(items, user_gender)
+                    
+                    # Apply rating filter only if not skipped
+                    # if not skip_rating_filter:
+                    #     items = filter_by_rating(items)
                     
                     # Then cap to what we intend to rank
-                    cap = max(_config.SHOPPING_RESULTS_TO_RANK, 1)
-                    normalized_capped = cap_results(normalized_filtered, cap)
+                    items = cap_results(items, _config.SHOPPING_RESULTS_TO_RANK)
 
-                    duration = time.time() - start_time
-                    logger.info("%d results | %dms | '%s'", len(items), int(duration * 1000), query)
+                    # Retry with relaxed filters if we don't have enough results
+                    if len(items) < 1:
 
+                        if params.get("min_price") is not None or params.get("max_price") is not None:
+                            logger.warning("Not enough search results, trying again without price filtering")
+                            return await self.search_item(
+                                keywords=keywords, 
+                                user_gender=user_gender, 
+                                thread_id=thread_id,
+                                min_price=None, 
+                                max_price=None,
+                                skip_rating_filter=skip_rating_filter
+                            )
+                        
+                        elif not skip_rating_filter:
+                            logger.warning("Not enough search results, trying again without rating filtering")
+                            return await self.search_item(
+                                keywords=keywords, 
+                                user_gender=user_gender, 
+                                thread_id=thread_id,
+                                min_price=None, 
+                                max_price=None,
+                                skip_rating_filter=True
+                            )
 
-                    # if len(normalized_capped) < 4:
-                    #     logger.warning("Not enough search results, removing last keyword and trying again")
-                    #     keywords = keywords.split(" ")[:-1]
-                    #     keywords = " ".join(keywords)
-                    #     return await self.search_item(keywords, user_gender, thread_id)
-
-                    return normalized_capped
+                    return items, unfiltered_results_length
 
                 except Exception as e:
                     if attempt < max_attempts:
-                        # Exponential backoff with jitter
                         delay = base_delay * (2 ** (attempt - 1)) + random.uniform(0, 0.25)
                         logger.warning("SerpApi attempt %d/%d failed for '%s': %s; retrying in %.2fs", attempt, max_attempts, keywords, str(e), delay)
                         await asyncio.sleep(delay)

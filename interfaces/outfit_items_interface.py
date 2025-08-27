@@ -115,12 +115,6 @@ class OutfitItemsInterface:
             if items:
                 items.sort(key=lambda x: x.get('created_at', ''), reverse=True)
             
-            logger.info(f"[DB] Found {len(items)} outfit items for thread {thread_id}")
-            
-            # Debug: show first few items
-            for i, item in enumerate(items[:3]):
-                logger.debug(f"[DB] Item {i+1}: {item['type']} - {item['title']} (ID: {item['id']})")
-            
             return items
             
         except Exception as e:

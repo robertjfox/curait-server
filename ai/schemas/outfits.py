@@ -1,114 +1,65 @@
-# The JSON schema created here has the following shape:
+import _config as config
+
+# Schema shape:
 # {
-#   "outfit_1": {
-#     "item_1": "string",
-#     "item_2": "string",
-#     ...
-#   },
-#   "outfit_2": {
-#     "item_1": "string",
-#     "item_2": "string",
-#     ...
-#   },
-#   ...
-#   "metadata": {
-#     "outfit_1": {
-#       "name": "string",
-#       "description": "string",
-#       "item_1": {
-#         "type": "string",
-#         "keywords": "string"
-#       },
-#       ...
-#     },
-#     "outfit_2": {
-#       "name": "string",
-#       "description": "string",
-#       "item_1": {
-#         "type": "string",
-#         "keywords": "string"
-#       },
-#       ...
+#   "outfits": [
+#     {
+#       "name": "outfit name",
+#       "description": "outfit description", 
+#       "items": [
+#         {"type": "shirt", "keywords": "red leather jacket"},
+#         {"type": "pants", "keywords": "blue suede shoes"},
+#         ...
+#       ]
 #     },
 #     ...
-#   }
+#   ]
 # }
 
-from typing import List
 
-def generate_outfit_schema(num_outfits: int, num_items: int, clothing_items: List[str]):
-    # Keywords section - comes first for immediate search
-    keywords_properties = {}
-    keywords_required = []
-    
-    for i in range(1, num_outfits + 1):
-        outfit_key = f"outfit_{i}"
-        item_keywords = {}
-        
-        for j in range(1, num_items + 1):
-            item_key = f"item_{j}"
-            item_keywords[item_key] = {
+def generate_outfit_schema(queue_multiplier: int):
+    num_outfits = config.NUM_OUTFITS_TO_GENERATE * queue_multiplier
+    num_items = config.NUM_ITEMS_PER_OUTFIT
+    clothing_items = config.CLOTHING_ITEMS
+
+    # Build outfits array with name/description and items array
+    item_object_schema = {
+        "type": "object",
+        "properties": {
+            "type": {"type": "string", "enum": clothing_items},
+            "keywords": {
                 "type": "string",
-                "description": "Space-separated keywords ONLY. Use spaces between words, NEVER commas, quotes, or special characters. Example: 'mens slim fit navy cotton chinos' NOT 'mens, slim, fit, navy, cotton, chinos'"
-            }
-        
-        keywords_properties[outfit_key] = {
-            "type": "object", 
-            "properties": item_keywords,
-            "required": [f"item_{j}" for j in range(1, num_items + 1)],
-            "additionalProperties": False
-        }
-        keywords_required.append(outfit_key)
-    
-    # Metadata section - comes after keywords
-    metadata_properties = {}
-    metadata_required = []
+                "description": "Single space-delimited keyword string for this clothing item. Must be ONE complete keyword phrase with spaces between words (never commas). Example: 'mens slim fit navy cotton chinos' as ONE string, NOT comma-separated values."
+            },
+        },
+        "required": ["type", "keywords"],
+        "additionalProperties": False,
+    }
 
-    for i in range(1, num_outfits + 1):
-        outfit_key = f"outfit_{i}"
-        
-        item_properties = {
+    outfit_object_schema = {
+        "type": "object",
+        "properties": {
             "name": {"type": "string"},
             "description": {"type": "string"},
-        }
-        item_required = ["name", "description"]
-
-        for j in range(1, num_items + 1):
-            item_key = f"item_{j}"
-            item_properties[item_key] = {
-                "type": "object",
-                "properties": {
-                    "type": {"type": "string", "enum": clothing_items},
-                    "keywords": {
-                        "type": "string",
-                        "description": "Space-separated keywords ONLY. Use spaces between words, NEVER commas, quotes, or special characters. Example: 'mens slim fit navy cotton chinos' NOT 'mens, slim, fit, navy, cotton, chinos'"
-                    },
-                },
-                "required": ["type", "keywords"],
-                "additionalProperties": False,
+            "items": {
+                "type": "array",
+                "minItems": num_items,
+                "maxItems": num_items,
+                "items": item_object_schema
             }
-            item_required.append(item_key)
-
-        metadata_properties[outfit_key] = {
-            "type": "object",
-            "properties": item_properties,
-            "required": item_required,
-            "additionalProperties": False,
-        }
-        metadata_required.append(outfit_key)
-
-    # Combined schema with keywords first, then metadata
-    all_properties = {}
-    all_properties.update(keywords_properties)
-    all_properties["metadata"] = {
-        "type": "object",
-        "properties": metadata_properties,
-        "required": metadata_required,
-        "additionalProperties": False
+        },
+        "required": ["name", "description", "items"],
+        "additionalProperties": False,
     }
-    
-    all_required = keywords_required + ["metadata"]
 
+    outfits_array_schema = {
+        "type": "array",
+        "minItems": num_outfits,
+        "maxItems": num_outfits,
+        "items": outfit_object_schema
+    }
+
+    # Combined schema with ONLY outfits (no top-level keywords array)
     return {
         "type": "json_schema",
         "json_schema": {
@@ -116,8 +67,10 @@ def generate_outfit_schema(num_outfits: int, num_items: int, clothing_items: Lis
             "strict": True,
             "schema": {
                 "type": "object",
-                "properties": all_properties,
-                "required": all_required,
+                "properties": {
+                    "outfits": outfits_array_schema,
+                },
+                "required": ["outfits"],
                 "additionalProperties": False,
             },
         },

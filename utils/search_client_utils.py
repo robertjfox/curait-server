@@ -42,7 +42,6 @@ def create_semaphore(max_concurrency: int) -> asyncio.Semaphore:
     return asyncio.Semaphore(max_concurrency)
 
 
-
 def filter_price_min_max(results: List[Dict[str, Any]], min_price: Optional[int], max_price: Optional[int]) -> List[Dict[str, Any]]:
     filtered_results = []
     for result in results:

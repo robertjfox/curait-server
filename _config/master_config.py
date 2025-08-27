@@ -25,7 +25,7 @@ SHOPPING_RESULTS_TO_FETCH = int(os.getenv("SHOPPING_RESULTS_TO_FETCH", "40"))
 SHOPPING_RESULTS_TO_RANK = int(os.getenv("SHOPPING_RESULTS_TO_RANK", "20"))
 
 CLOTHING_ITEMS = [
-   "outerwear",  "tops", "dresses", "bottoms", "footwear",
+   "outerwear",  "tops", "dresses", "bottoms", "footwear", "accessories",
 ]
 
 # Product ranking toggle
@@ -39,7 +39,7 @@ BACKGROUND_REMOVAL_MAX_DIM = int(os.getenv("BACKGROUND_REMOVAL_MAX_DIM", "1024")
 
 # Search and ranking performance settings
 SERPER_MAX_CONCURRENCY = int(os.getenv("SERPER_MAX_CONCURRENCY", "15"))  # Increased from default 10
-RANKING_BATCH_SIZE = int(os.getenv("RANKING_BATCH_SIZE", "6"))  # Process rankings in parallel batches
+RANKING_BATCH_SIZE = int(os.getenv("RANKING_BATCH_SIZE", "12"))  # Process rankings in parallel batches
 RANKING_MAX_RETRIES = int(os.getenv("RANKING_MAX_RETRIES", "1"))  # Number of retries for failed ranking operations
 RANKING_RETRY_DELAY = float(os.getenv("RANKING_RETRY_DELAY", "1.0"))  # Initial delay between retries in seconds
 RANKING_TIMEOUT = int(os.getenv("RANKING_TIMEOUT", "60"))  # Timeout for ranking operations in seconds

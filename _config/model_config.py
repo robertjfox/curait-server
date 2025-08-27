@@ -21,12 +21,11 @@ GPT_IMAGE_1 = "gpt-image-1"
 # Category: "outfit_generation"
 OUTFIT_GENERATION = {
     # "model": GPT_4O_MINI,
-    # "model": GPT_4O,
+    "model": GPT_4O,
     # "model": GPT_O4_MINI,
     # "model": GPT_5,
-    "model": GPT_5_MINI,
+    # "model": GPT_5_MINI,
     # "model": GPT_5_NANO,
-    # "model": GPT_O4_MINI
 }
 
 # For ranking and scoring product search results with visual analysis
@@ -34,9 +33,9 @@ OUTFIT_GENERATION = {
 PRODUCT_RANKING = {
     # "model": GPT_4O_MINI,
     # "model": GPT_O4_MINI,
-    # "model": GPT_4O,
+    "model": GPT_4O,
     # "model": GPT_5_MINI,
-    "model": GPT_5_NANO,
+    # "model": GPT_5_NANO,
 }
 
 # For generating virtual try-on images
@@ -48,6 +47,15 @@ VIRTUAL_TRY_ON = {
     "quality": "low",
     # "quality": "medium",
     "n": 1,
+}
+
+# For generating outfit flatlay default rendering images
+FLATLAY_RENDERING = {
+    "model": GPT_IMAGE_1,
+    "size": "1024x1024",
+    "bucket": "outfit-flatlay-images",
+    "quality": "low",
+    
 }
 
 
@@ -68,5 +76,9 @@ CONVERSATION_DECISION = {
 # Category: "item_modification"
 ITEM_MODIFICATION = {
     "model": GPT_4O_MINI,
+}
+
+TITLE_GENERATION = {
+    "model": GPT_4O,
 }
 

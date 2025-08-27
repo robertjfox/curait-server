@@ -20,11 +20,11 @@ async def create_thread(request: ThreadCreateRequest):
             user_id=request.user_id,
         )
 
+        logger.info(f"🧵 Created thread {thread_id[:6]}")
+
         if not thread_id:
             raise HTTPException(status_code=500, detail="Failed to create thread")
 
-        logger.info(f"🧵 Created thread {thread_id}")
-        
         return {
             "success": True,
             "thread_id": thread_id
@@ -38,14 +38,13 @@ async def create_thread(request: ThreadCreateRequest):
 @router.post("/{thread_id}/chat")
 async def chat_in_thread(thread_id: str, request: ThreadChatRequest):
     try:
-        logger.info(f"🧵 Chatting in thread {thread_id}")
+        logger.info(f"🧵 Chatting in thread {thread_id[:6]}")
         logger.info(f"🧵 Request: {request}")
 
         await thread_service.route_user_message(
             thread_id=thread_id,
             user_message=request.message,
             user_intent=request.user_intent,
-            outfit_id=request.outfit_id
         )
         
         return {

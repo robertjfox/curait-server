@@ -12,7 +12,7 @@ from utils.search_client_utils import (
     create_semaphore,
     filter_blocked_sources,
     filter_by_gender,
-    filter_price_min_max,
+    # filter_price_min_max,
 )
 
 logger = logging.getLogger(__name__)

@@ -190,7 +190,6 @@ async def create_product_grid_and_upload(
     if not products:
         raise ValueError("products list is empty")
 
-    start_time = time.time()
     n = len(products)   
     labels = index_labels if (index_labels and len(index_labels) == n) else list(range(n))
 
@@ -244,7 +243,6 @@ async def create_product_grid_and_upload(
         draw.text((x2, start_y + text_h1 + 6), line2, fill=(0, 0, 0), font=sub_font)
 
     # Download all images in parallel with reduced timeout
-    download_start = time.time()
     async with httpx.AsyncClient(timeout=5.0) as shared_client:  # Reduced timeout from 10s
         download_tasks = []
         for i, product in enumerate(products):
@@ -256,10 +254,8 @@ async def create_product_grid_and_upload(
         
         downloaded_images = await asyncio.gather(*download_tasks, return_exceptions=True)
     
-    download_time = time.time() - download_start
     
     # Process images in parallel using thread pool
-    process_start = time.time()
     image_area_h = cell_h - METADATA_TOP_HEIGHT - METADATA_BOTTOM_HEIGHT
     
     # Prepare arguments for parallel processing
@@ -275,10 +271,7 @@ async def create_product_grid_and_upload(
     with ThreadPoolExecutor(max_workers=min(8, len(process_args))) as executor:
         processed_cells = list(executor.map(_process_single_image, process_args))
     
-    process_time = time.time() - process_start
-    
     # Compose grid
-    compose_start = time.time()
     successful_images = 0
     for i, cell_img in enumerate(processed_cells):
         if cell_img is not None:
@@ -289,20 +282,15 @@ async def create_product_grid_and_upload(
             y = header_height + padding + r * (cell_h + padding)  # Offset by header height
             grid.paste(cell_img, (x, y))
     
-    compose_time = time.time() - compose_start
-    
     # Encode to JPEG bytes with lower quality for smaller size
-    encode_start = time.time()
     out = io.BytesIO()
     grid.save(out, format="JPEG", quality=70, optimize=True)  # Reduced quality from 85
     img_bytes = out.getvalue()
-    encode_time = time.time() - encode_start
 
     # Upload to Supabase
     public_url: Optional[str] = None
     filename = f"{filename_prefix}_{int(time.time())}_{uuid.uuid4().hex}.jpg"
     
-    upload_start = time.time()
     try:
         supabase = get_supabase_client()
         supabase.storage.from_(bucket).upload(
@@ -312,13 +300,9 @@ async def create_product_grid_and_upload(
         )
         
         public_url = supabase.storage.from_(bucket).get_public_url(filename)
-        upload_time = time.time() - upload_start
-        
-    except Exception as e:
-        upload_time = time.time() - upload_start
-        logger.error(f"Failed to upload grid to bucket '{bucket}' after {upload_time:.1f}s: {e}")
-        public_url = None  # Ensure public_url is explicitly set to None on failure
 
-    total_time = time.time() - start_time
+    except Exception as e:
+        logger.error(f"Failed to upload grid to bucket '{bucket}': {e}")
+        public_url = None  # Ensure public_url is explicitly set to None on failure
 
     return img_bytes, public_url, filename 

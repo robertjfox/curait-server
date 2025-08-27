@@ -309,11 +309,9 @@ class FaceInjector:
                 keys_to_remove = [k for k in self._face_cache.keys() if k.startswith(f"{source_key}_")]
                 for key in keys_to_remove:
                     del self._face_cache[key]
-                logger.info(f"Cleared cache for {source_key}")
             else:
                 # Clear all cache
                 self._face_cache.clear()
-                logger.info("Cleared all face embedding cache")
 
 
 def restore_faces_bgr(img_bgr: np.ndarray, upscale: Optional[float] = None) -> np.ndarray:

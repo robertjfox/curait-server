@@ -26,7 +26,7 @@ virtual_tryon_service = VirtualTryOnService()
 async def lifespan(app: FastAPI):
 	"""Handle application startup and shutdown events"""
 	# Startup
-	logger.info("🚀 AI Stylist Server starting up...")
+	logger.info("\n\n🚀 🚀 🚀 🚀 🚀 SERVER STARTING UP 🚀 🚀 🚀 🚀 🚀")
 	
 	# Set up InsightFace persistent storage path BEFORE importing FaceInjector
 	if _config.FACE_SWAP_ENABLED:
@@ -39,13 +39,12 @@ async def lifespan(app: FastAPI):
 			FaceInjector.instance()
 		except Exception as e:
 			logger.error(f"❌ Failed to preload FaceInjector model: {e}")
-			# Continue startup even if face model fails to load
-	else:
-		logger.info("🧯 FACE_SWAP_ENABLED is false; skipping InsightFace setup and FaceInjector preload")
+		
 	
 	yield
+	
 	# Shutdown
-	logger.info("🔄 AI Stylist Server shutting down...")
+	logger.info("\n\n🛑 🛑 🛑 🛑 🛑 SERVER SHUTTING DOWN 🛑 🛑 🛑 🛑 🛑")
 
 app = FastAPI(lifespan=lifespan, title="AI Stylist API", version="1.0.0")
 
@@ -83,12 +82,11 @@ async def detailed_health_check():
 
 if __name__ == "__main__":
 	import uvicorn
-	logger.info("🎯 Starting AI Stylist Server locally...")
 	uvicorn.run(
 		"main:app",
 		host="0.0.0.0",
 		port=8000,
-		reload=True,
+		reload=False,  # Disabled auto-reload - manual restart required for code changes
 		log_level="info",
 		access_log=False,
 	) 

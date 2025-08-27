@@ -1,6 +1,5 @@
 import logging
 import asyncio
-import time
 from typing import Any, Dict, List
 
 from clients.openai_client import get_openai_client
@@ -30,21 +29,20 @@ class ProductRankingService:
         unchanged. Also applies background removal to the top ranked product.
         """
         
-        grid_start_time = None
-        
         async with self._ranking_semaphore:
             try:
                 top_k = max(1, int(getattr(_config, "SHOPPING_RESULTS_TO_RETURN", 10)))
                 cap = max(1, int(getattr(_config, "SHOPPING_RESULTS_TO_RANK", 20)))
                 head = (results or [])[:cap]
-                n = len(head)
 
                 products_with_images = [r for r in head if r.get("imageUrl")]
                 if not products_with_images:
-                    logger.warning("No products with images found for grid creation")
-                    return head[:top_k]
+                    logger.warning(f"No products with images found for grid creation. Total results: {len(head)}, Results with images: 0")
+                    raise ValueError("No products with images found for ranking")
                 
-                grid_start_time = time.time()
+                # Use the actual number of products with images for consistency
+                n = len(products_with_images)
+                
                 try:
                     # Extract keywords from item_context for the header
                     ranking_keywords = item_context.get("keywords") if item_context else None
@@ -54,49 +52,36 @@ class ProductRankingService:
                     )
                     grid_data_uri = f"data:image/jpeg;base64,{base64.b64encode(img_bytes).decode('ascii')}"
                 except Exception as grid_err:
-                    logger.error(f"🖼️ GRID CREATION FAILED - Returning first {top_k} results unranked: {grid_err}")
-                    return head[:top_k]
+                    logger.error(f"🖼️ GRID CREATION FAILED: {grid_err}")
+                    raise grid_err
 
-                grid_end_time = time.time()
-                ai_start_time = time.time()
-                
                 try:
                     ratings = await self.openai_client.rank_products_flow(
                         user_data=user_data,    
                         item_context=item_context,
                         num_results=n,
                         grid_image_data_uri=grid_data_uri,
-                        thread_id=thread_id,
-                        timeout=getattr(_config, "RANKING_TIMEOUT", None),
                     )
                 except Exception as ranking_err:
                     logger.warning(f"Failed to rank products: {ranking_err}")
-                    return head[:top_k]
+                    raise ranking_err
 
-                # Rank and sort results
+                # Rank and sort results using products_with_images instead of head
                 sorted_indices = sorted(range(n), key=lambda i: (-ratings[i], i))
                 ranked_all: List[Dict[str, Any]] = []
                 for idx in sorted_indices:
-                    product = head[idx].copy()
+                    product = products_with_images[idx].copy()
                     product["ranking"] = ratings[idx]
                     product["original_index"] = idx
                     ranked_all.append(product)
                 final_ranked = ranked_all[:top_k]
 
-
-
-                # Log timing information with correct measurements
-                grid_time = grid_end_time - grid_start_time
-                ai_time = time.time() - ai_start_time   
-                logger.info(f"Grid creation: {grid_time:.2f}s, AI: {ai_time:.2f}s")
-
-                return final_ranked
+                return final_ranked, ratings
 
             except Exception as e:
                 if isinstance(e, asyncio.TimeoutError):
-                    logger.warning(f"Product ranking timed out after {_config.RANKING_TIMEOUT}s, returning unranked results")
+                    logger.warning(f"Product ranking timed out after {_config.RANKING_TIMEOUT}s")
                 else:
                     error_type = type(e).__name__
                     logger.warning(f"Product ranking failed ({error_type}): {str(e)[:100]}...")
-                top_k = max(1, int(getattr(_config, "SHOPPING_RESULTS_TO_RETURN", 10)))
-                return (results or [])[:top_k]
+                raise e

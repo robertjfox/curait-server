@@ -1,9 +1,9 @@
 import os
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from clients.shopping.serper_client import SerperShoppingClient
 from clients.shopping.serpapi_client import SerpApiShoppingClient
-
+import _config as config
 
 logger = logging.getLogger(__name__)
 
@@ -31,16 +31,19 @@ class ShoppingService:
         self, 
         keywords: str, 
         user_data: Dict[str, Any], 
-        thread_id: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+        thread_id: Optional[str] = None,    
+    ) -> Tuple[List[Dict[str, Any]], int]:
         """Search for products based on keywords."""
         try:
-            results = await self._client.search_item(
+            results, unfiltered_results_length = await self._client.search_item(
                 keywords=keywords,
                 user_gender=user_data.get("gender"),
                 thread_id=thread_id,
+                min_price=config.SHOPPING_MIN_PRICE,    
+                max_price=config.SHOPPING_MAX_PRICE
             )
-            return results or []
+
+            return results or [], unfiltered_results_length
         except Exception as e:
             logger.error(f"Shopping search failed for keywords '{keywords}': {e}")
             return []

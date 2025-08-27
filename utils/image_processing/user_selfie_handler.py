@@ -44,7 +44,6 @@ def list_user_selfies() -> List[str]:
     try:
         response = supabase.storage.from_(bucket).list()
         filenames = [item['name'] for item in response if item.get('name')]
-        logger.info(f"✅ Found {len(filenames)} selfies in bucket")
         return filenames
         
     except Exception as e:
