@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from clients.openai_client import get_openai_client
 import _config
@@ -21,7 +21,7 @@ class ProductRankingService:
         item_context: Dict[str, Any],
         results: List[Dict[str, Any]],
         thread_id: str | None = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> Tuple[List[Dict[str, Any]], List[int]]:
         """
         Rank products using image-only AI analysis by creating a product grid, asking the
         model for per-item ratings (1–10), and returning the top-K items where
@@ -38,7 +38,10 @@ class ProductRankingService:
                 products_with_images = [r for r in head if r.get("imageUrl")]
                 if not products_with_images:
                     logger.warning(f"No products with images found for grid creation. Total results: {len(head)}, Results with images: 0")
-                    raise ValueError("No products with images found for ranking")
+                    # Fallback: return first K results unchanged with default ratings
+                    fallback_results = head[:top_k]
+                    fallback_ratings = [5] * len(fallback_results)  # Default rating of 5
+                    return fallback_results, fallback_ratings
                 
                 # Use the actual number of products with images for consistency
                 n = len(products_with_images)
@@ -53,7 +56,10 @@ class ProductRankingService:
                     grid_data_uri = f"data:image/jpeg;base64,{base64.b64encode(img_bytes).decode('ascii')}"
                 except Exception as grid_err:
                     logger.error(f"🖼️ GRID CREATION FAILED: {grid_err}")
-                    raise grid_err
+                    # Fallback: return products with images unchanged with default ratings
+                    fallback_results = products_with_images[:top_k]
+                    fallback_ratings = [5] * len(fallback_results)
+                    return fallback_results, fallback_ratings
 
                 try:
                     ratings = await self.openai_client.rank_products_flow(
@@ -61,10 +67,14 @@ class ProductRankingService:
                         item_context=item_context,
                         num_results=n,
                         grid_image_data_uri=grid_data_uri,
+                        thread_id=thread_id,
                     )
                 except Exception as ranking_err:
                     logger.warning(f"Failed to rank products: {ranking_err}")
-                    raise ranking_err
+                    # Fallback: return products with images unchanged with default ratings
+                    fallback_results = products_with_images[:top_k]
+                    fallback_ratings = [5] * len(fallback_results)
+                    return fallback_results, fallback_ratings
 
                 # Rank and sort results using products_with_images instead of head
                 sorted_indices = sorted(range(n), key=lambda i: (-ratings[i], i))
@@ -84,4 +94,9 @@ class ProductRankingService:
                 else:
                     error_type = type(e).__name__
                     logger.warning(f"Product ranking failed ({error_type}): {str(e)[:100]}...")
-                raise e
+                
+                # Fallback: return first K results unchanged with default ratings
+                top_k = max(1, int(getattr(_config, "SHOPPING_RESULTS_TO_RETURN", 10)))
+                fallback_results = (results or [])[:top_k]
+                fallback_ratings = [5] * len(fallback_results)
+                return fallback_results, fallback_ratings

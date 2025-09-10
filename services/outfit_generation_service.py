@@ -39,6 +39,7 @@ class OutfitGenerationService:
 	) -> None:
 		"""Handle shopping->ranking->storage for a single item."""
 		try:
+
 			start_time = time.time()
 
 			# Step 1: SHOPPING ------------------------------------------------------------

@@ -50,9 +50,10 @@ def generate_outfit_system_prompt(num_outfits: int, user_gender: str = None, que
         "- Bottoms: fit and cut/length helpful (e.g., wide leg, cropped).\n"
         "- No brands. ~6–12 tokens total. Keep queries broad enough for search.\n"
         "- Women's keywords should be slightly more general than men's.\n\n"
+        "- DONT be vague. A jacket needs more description than just 'jacket'. A sweatshirt should be hooded, crewneck, zip etc. A shirt should be button up, t shirt, polo, etc. These are just examples. Use your BEST judgement without being TOO SPECIFIC. \n\n"
 
         "META:\n"
-        "- Provide a creative outfit name (not literal) and a one-sentence description of why it fits the context.\n"
+        "- Provide a creative outfit name (not literal, not corny) and a one-sentence description of why it fits the context.\n"
     )
 
 

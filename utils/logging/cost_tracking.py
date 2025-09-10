@@ -1,160 +1,136 @@
-import logging, os, re
-from typing import Any, Dict, Optional
+import logging
+from typing import Optional, Any
+
+# Simple pricing in dollars per 1K tokens  
+MODEL_PRICING = {
+    "gpt-4o": {"in": 0.005, "out": 0.015},
+    "gpt-4o-mini": {"in": 0.00015, "out": 0.00060},
+    "o4-mini": {"in": 0.00110, "out": 0.00440},
+    "gpt-5": {"in": 0.00125, "out": 0.0100},
+    "gpt-5-mini": {"in": 0.00025, "out": 0.00200},
+    "gpt-5-nano": {"in": 0.00005, "out": 0.00040},
+}
+
+def calculate_openai_cost_cents(response: Any, model: Optional[str] = None) -> int:
+    """Calculate cost in cents from OpenAI response object using actual usage data"""
+    if not response:
+        return 0
+        
+    # Get model and usage from response
+    model = getattr(response, "model", model or "gpt-4o-mini")
+    usage = getattr(response, "usage", None)
+    
+    if not usage:
+        return 0
+    
+    # Normalize model name (remove date suffixes and version indicators)
+    import re
+    norm_model = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", model)
+    norm_model = re.sub(r"-(preview|alpha|beta)(-\d{4}-\d{2}-\d{2})?$", "", norm_model)
+    norm_model = re.sub(r"-\d{4}$", "", norm_model)  # Remove year suffixes like -0613
+    
+    # Get pricing (default to gpt-4o-mini if not found)
+    pricing = MODEL_PRICING.get(norm_model, MODEL_PRICING["gpt-4o-mini"])
+    
+    # Get actual token counts from usage object
+    prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+    completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+    
+    # Calculate cost in dollars
+    cost_dollars = (prompt_tokens / 1000.0) * pricing["in"] + (completion_tokens / 1000.0) * pricing["out"]
+    return int(cost_dollars * 100)  # Convert to cents
 
 class CostLogger:
-    # ---- Pricing ----
-    MODEL_PRICING = {
-        "gpt-4o": {"in": 0.0025, "out": 0.0100},
-        "gpt-4o-mini": {"in": 0.00015, "out": 0.00060},
-        "o4-mini": {"in": 0.00110, "out": 0.00440},
-        "gpt-5": {"in": 0.00125, "out": 0.0100},
-        "gpt-5-mini": {"in": 0.00025, "out": 0.00200},
-        "gpt-5-nano": {"in": 0.00005, "out": 0.00040},
-        "gpt-image-1": {"txt_in": 0.00500, "img_in": 0.01000, "img_out": 0.04000},
-    }
-    SEARCH_PRICING = {"serper": 0.0006, "serpapi": 0.0030}
-
-
-    def __init__(self) -> None:
+    """Simple cost tracking that writes directly to thread_costs table"""
+    
+    def __init__(self):
         self.log = logging.getLogger(__name__)
-        self._enabled: Optional[bool] = None
-        self._s: Dict[str, Dict[str, Any]] = {}
-
-
-    # ---- Internals ----
-    def _on(self) -> bool:
-        if self._enabled is None:
-            self._enabled = os.getenv("ENABLE_COST_LOGGING", "true").lower() in ("1","true","yes","on")
-        return self._enabled
-
-
-    def _norm(self, model: str) -> str:
-        m = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", model)
-        return re.sub(r"-(preview|alpha|beta)(-\d{4}-\d{2}-\d{2})?$", "", m)
-
-
-    def _ensure(self, sid: str) -> Dict[str, Any]:
-        return self._s.setdefault(sid, {
-            "outfit_gen": {"cost": 0.0, "calls": 0},
-            "search": {"cost": 0.0, "calls": 0},
-            "ranking": {"cost": 0.0, "calls": 0},
-            "vton": {"cost": 0.0, "calls": 0},
-            "total_cost": 0.0,
-        })
-
-
-    def _bump(self, s: Dict[str, Any], key: str, cost: float, calls: int = 1) -> None:
-        s[key]["cost"] += float(cost)
-        s[key]["calls"] += int(calls)
-        s["total_cost"] += float(cost)
-
-
-    # ---- Public, minimal surface ----
-    def track_openai(
-        self,
-        *,
-        thread_id: Optional[str],
-        category: str = "outfit_gen",
-        model: Optional[str] = None,
-        response: Optional[Any] = None,
-        prompt_tokens: int = 0,
-        completion_tokens: int = 0,
-        vton_quality_default: str = "medium",
-    ) -> None:
-        """
-        One method for ALL OpenAI calls.
-        Pass either (model + tokens) OR (response with .model/.usage).
-        Handles text models and gpt-image-1 automatically.
-        """
-        if not (self._on() and thread_id):
-            return
-        s = self._ensure(thread_id)
-
-        # Prefer response if given
-        if response is not None:
-            model = getattr(response, "model", model or "gpt-4o")
-            usage = getattr(response, "usage", None)
-        else:
-            usage = None
-            model = model or "gpt-4o"
-
-        norm = self._norm(model)
-
-        # Image model path
-        if norm == "gpt-image-1":
+        self._supabase = None  # Lazy init to avoid circular import with _config
+    
+    def _get_supabase(self):
+        if self._supabase is None:
+            # Lazy import to avoid _config import during module import time
+            from clients.supabase_client import get_supabase_client
+            self._supabase = get_supabase_client()
+        return self._supabase
+    
+    def _increment_cost(self, thread_id: str, calls_field: str, cost_field: str, cost_cents: int) -> None:
+        """Increment costs using plain Supabase table operations (no RPC)."""
+        try:
+            sb = self._get_supabase()
+            # Fetch existing row (if any)
             try:
-                self.log.debug(f"gpt-image-1 detected, usage: {usage}")
-                if usage and getattr(usage, "input_tokens_details", None) is not None:
-                    txt = getattr(usage.input_tokens_details, "text_tokens", 0) or 0
-                    img = getattr(usage.input_tokens_details, "image_tokens", 0) or 0
-                    out = getattr(usage, "output_tokens", 0) or 0
-                    p = self.MODEL_PRICING["gpt-image-1"]
-                    # log image input and output cost here  
-                    txt_in_p = (txt/1000.0)*p["txt_in"]
-                    img_in_p = (img/1000.0)*p["img_in"]
-                    img_out_p = (out/1000.0)*p["img_out"]    
-
-                    cost = txt_in_p + img_in_p + img_out_p
-                    # self.log.info(f"💰 VTON cost: {txt_in_p:.4f} txt | {img_in_p:.4f} img | {img_out_p:.4f} out = ${cost:.4f}")
-                    
-                else:
-                    # Fallback estimate by quality
-                    from _config.model_config import VIRTUAL_TRY_ON
-                    q = (VIRTUAL_TRY_ON.get("quality") or vton_quality_default).lower()
-                    cost = {"low":0.015, "medium":0.060, "high":0.250}.get(q, 0.060)
-                    self.log.info(f"💰 VTON cost fallback (no usage): quality={q} = ${cost:.4f}")
-                self._bump(s, "vton" if category=="outfit_gen" else category, cost, 1)
-            except Exception as e:
-                self.log.error(f"❌ VTON cost tracking failed: {e}")
-                # Still track a minimal cost so we don't lose the call count  
-                self._bump(s, "vton" if category=="outfit_gen" else category, 0.01, 1)
+                res = sb.table("thread_costs").select("*").eq("thread_id", thread_id).single().execute()
+                row = res.data if res and getattr(res, 'data', None) else None
+            except Exception:
+                row = None
+            
+            if not row:
+                # Insert a new row initialized to zeros, then set the first increments
+                payload = {
+                    "thread_id": thread_id,
+                    "outfit_gen_calls": 0,
+                    "outfit_gen_cost_cents": 0,
+                    "search_calls": 0,
+                    "search_cost_cents": 0,
+                    "ranking_calls": 0,
+                    "ranking_cost_cents": 0,
+                    "flatlay_gen_calls": 0,
+                    "flatlay_gen_cost_cents": 0,
+                    # optional vton columns if present in schema
+                    "vton_gen_calls": 0,
+                    "vton_gen_cost_cents": 0,
+                }
+                payload[calls_field] = 1
+                payload[cost_field] = int(cost_cents)
+                sb.table("thread_costs").insert(payload).execute()
+            else:
+                # Update existing row by incrementing values
+                new_calls = int((row.get(calls_field) or 0)) + 1
+                new_cost = int((row.get(cost_field) or 0)) + int(cost_cents)
+                sb.table("thread_costs").update({
+                    calls_field: new_calls,
+                    cost_field: new_cost,
+                }).eq("thread_id", thread_id).execute()
+        except Exception as e:
+            self.log.error(f"Cost update failed for {calls_field}: {e}")
+    
+    def track_outfit_gen(self, thread_id: str, response: Any = None, cost_cents: Optional[int] = None) -> None:
+        """Track outfit generation OpenAI call cost using actual response usage data"""
+        if not thread_id:
             return
-
-        # Text model path
-        p = self.MODEL_PRICING.get(norm) or self.MODEL_PRICING["gpt-4o-mini"]
         
-        if usage:
-            prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
-            completion_tokens = getattr(usage, "completion_tokens", 0) or 0
-        cost = (max(prompt_tokens,0)/1000.0)*p["in"] + (max(completion_tokens,0)/1000.0)*p["out"]
-        self._bump(s, category, cost, 1)
-
-
-    def track_search(self, *, thread_id: Optional[str], provider: str = "serpapi") -> None:
-        if not (self._on() and thread_id):
+        if cost_cents is None and response:
+            cost_cents = calculate_openai_cost_cents(response)
+        
+        if cost_cents:
+            self._increment_cost(thread_id, "outfit_gen_calls", "outfit_gen_cost_cents", cost_cents)
+    
+    def track_search(self, thread_id: str, provider: str = "serpapi") -> None:
+        """Track search client cost (serper=0.06 cents, serpapi=0.30 cents)"""
+        if not thread_id:
             return
-        s = self._ensure(thread_id)
-        self._bump(s, "search", float(self.SEARCH_PRICING.get(provider, self.SEARCH_PRICING["serpapi"])), 1)
-
-
-    def log_final_summary(self, thread_id: str) -> None:
-        if not self._on():
+            
+        cost_cents = 6 if provider == "serper" else 30  # 0.0006 = 0.06 cents, 0.003 = 0.30 cents
+        self._increment_cost(thread_id, "search_calls", "search_cost_cents", cost_cents)
+    
+    def track_ranking(self, thread_id: str, response: Any = None, cost_cents: Optional[int] = None) -> None:
+        """Track ranking OpenAI call cost using actual response usage data"""
+        if not thread_id:
             return
-        s = self._s.get(thread_id)
-        if not s:
+        
+        if cost_cents is None and response:
+            cost_cents = calculate_openai_cost_cents(response)
+            
+        if cost_cents:
+            self._increment_cost(thread_id, "ranking_calls", "ranking_cost_cents", cost_cents)
+    
+    def track_flatlay_gen(self, thread_id: str) -> None:
+        """Track flatlay image generation (hardcoded to 1 cent)"""
+        if not thread_id:
             return
-        money = lambda x: f"${x:.4f}"
-        lines = [
-            f"• Outfit Gen: {money(s['outfit_gen']['cost'])}",
-            f"• Shopping Search: {money(s['search']['cost'])} | {s['search']['calls']} calls",
-            f"• Product Ranking: {money(s['ranking']['cost'])} | {s['ranking']['calls']} calls",
-            f"• VTON: {money(s['vton']['cost'])} | {s['vton']['calls']} calls",
-            f"• Total Cost: {money(s['total_cost'])}",
-        ]
-        logging.getLogger(__name__).info("\n".join(lines))
+            
+        self._increment_cost(thread_id, "flatlay_gen_calls", "flatlay_gen_cost_cents", 1)
 
-    def reset_thread(self, thread_id: str) -> None:
-        self._s.pop(thread_id, None)
-
-    def get_total_cost_cents(self, thread_id: str) -> Optional[int]:
-        """Get total cost for a thread in cents (rounded)"""
-        if not self._on():
-            return None
-        s = self._s.get(thread_id)
-        if not s:
-            return None
-        return round(s["total_cost"] * 100)  # Convert dollars to cents
-
-    def has_thread_data(self, thread_id: str) -> bool:
-        """Check if we have cost data for a thread"""
-        return thread_id in self._s and self._on()
+# Global instance
+cost_logger = CostLogger()

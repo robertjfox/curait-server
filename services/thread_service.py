@@ -139,7 +139,8 @@ class ThreadService:
                 queue_multiplier=queue_multiplier,
                 user_data=user_data,
                 conversation_history=conversation_history,  
-                outfit_history=outfit_history,      
+                outfit_history=outfit_history,
+                thread_id=thread_id,
                 on_keyword=lambda kw: asyncio.create_task(
                     self.outfit_generation_service._process_single_item(
                         item_id=item_ids_deque.popleft(),

@@ -32,8 +32,8 @@ OUTFIT_GENERATION = {
 # Category: "product_ranking"
 PRODUCT_RANKING = {
     # "model": GPT_4O_MINI,
-    # "model": GPT_O4_MINI,
-    "model": GPT_4O,
+    "model": GPT_O4_MINI,
+    # "model": GPT_4O,
     # "model": GPT_5_MINI,
     # "model": GPT_5_NANO,
 }
@@ -55,7 +55,6 @@ FLATLAY_RENDERING = {
     "size": "1024x1024",
     "bucket": "outfit-flatlay-images",
     "quality": "low",
-    
 }
 
 

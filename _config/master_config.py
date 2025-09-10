@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from utils.logging.cost_tracking import CostLogger
+from utils.logging.cost_tracking import cost_logger
 
 load_dotenv(override=True)
 
@@ -71,4 +71,4 @@ FACE_MIN_CONFIDENCE = float(os.getenv("FACE_MIN_CONFIDENCE", "0.5"))  # Minimum 
 INSIGHTFACE_HOME = os.getenv("INSIGHTFACE_HOME", os.path.expanduser("~/.insightface"))
 
 # Global cost logger instance
-cost_logger = CostLogger()
+cost_logger = cost_logger

@@ -50,7 +50,7 @@ class SerpApiShoppingClient:
             query = build_query(keywords)
 
             # testing - add new at the end of the query
-            query += " new"
+            # query += " new"
 
             num_to_fetch = _config.SHOPPING_RESULTS_TO_FETCH
 
@@ -62,8 +62,8 @@ class SerpApiShoppingClient:
                 "hl": "en",
                 "location": "New York, New York, United States",
                 "num": num_to_fetch,
-                "min_price": min_price,
-                "max_price": max_price,
+                # "min_price": min_price,
+                # "max_price": max_price,
                 "json_restrictor": "shopping_results[].{title, product_link, price, source, thumbnail, rating, reviews}"
             }
 

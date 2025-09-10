@@ -1,10 +1,8 @@
 import httpx
 import os
-import asyncio
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import _config
 import logging
-import time
 from utils.search_client_utils import (
     build_query,
     cap_results,
@@ -12,7 +10,7 @@ from utils.search_client_utils import (
     create_semaphore,
     filter_blocked_sources,
     filter_by_gender,
-    # filter_price_min_max,
+    filter_price_min_max,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,19 +31,20 @@ class SerperShoppingClient:
             await self._client.aclose()
             self._client = None
     
-    async def search_item(self, keywords: str, user_gender: str, thread_id: str = None) -> List[Dict[str, Any]]:
+    async def search_item(
+            self, 
+            keywords: str, 
+            user_gender: str, 
+            thread_id: str | None = None,
+            min_price: int | None = _config.SHOPPING_MIN_PRICE, 
+            max_price: int | None = _config.SHOPPING_MAX_PRICE,
+            ) -> Tuple[List[Dict[str, Any]], int]:
         """Search for a single item using keywords, returns raw search results."""
         async with self._sem:
             if not self.api_key:
                 raise ValueError("SERPER_API_KEY is required")
             
             query = build_query(keywords)
-
-            # add price min max to the end of the query like $100 - $200
-            # query = f"{query} ${_config.SHOPPING_MIN_PRICE} - ${_config.SHOPPING_MAX_PRICE}"
-
-            # add "new" to the end of the query
-            query = f"{query} new"
 
             # Request the configured number from Serper
             num_to_request = max(1, _config.SHOPPING_RESULTS_TO_FETCH)
@@ -64,8 +63,6 @@ class SerperShoppingClient:
             }
             
             try:
-                start_time = time.time()
-
                 response = await self._client.post(
                     self.base_url,
                     json=payload,
@@ -74,22 +71,24 @@ class SerperShoppingClient:
                 response.raise_for_status()
                 data = response.json()
                 
+                # Track search cost
+                _config.cost_logger.track_search(thread_id=thread_id, provider="serper")
+                
                 # Return raw shopping results - filter ALL results first, then cap for ranking
-                shopping_results_full = data.get("shopping", [])
+                items = data.get("shopping", [])
+
+                unfiltered_results_length = len(items)
                 
                 # Apply source filtering to ALL results
-                shopping_results_filtered = filter_blocked_sources(shopping_results_full, _config.BLOCKED_SOURCES)
-                shopping_results_filtered = filter_by_gender(shopping_results_filtered, user_gender)
-                # shopping_results_filtered = filter_price_min_max(shopping_results_filtered, _config.SHOPPING_MIN_PRICE, _config.SHOPPING_MAX_PRICE)
+                items = filter_blocked_sources(items, _config.BLOCKED_SOURCES)
+                items = filter_by_gender(items, user_gender)
+                items = filter_price_min_max(items, min_price, max_price)
 
                 # Then cap to what we intend to rank
                 cap = max(_config.SHOPPING_RESULTS_TO_RANK, 1)
-                shopping_results = cap_results(shopping_results_filtered, cap)
+                items = cap_results(items, cap)
 
-                duration = time.time() - start_time
-                # Individual search logging removed - see batch log in thread_service
-
-                return shopping_results
+                return items, unfiltered_results_length
                 
             except Exception as e:
                 logger.error("❌ Serper search failed for '%s'", keywords)
