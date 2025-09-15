@@ -71,9 +71,6 @@ class SerperShoppingClient:
                 response.raise_for_status()
                 data = response.json()
                 
-                # Track search cost
-                _config.cost_logger.track_search(thread_id=thread_id, provider="serper")
-                
                 # Return raw shopping results - filter ALL results first, then cap for ranking
                 items = data.get("shopping", [])
 

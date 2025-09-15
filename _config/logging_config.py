@@ -32,7 +32,6 @@ class ColoredFormatter(logging.Formatter):
         
         # Virtual try-on related
         'services.virtual_tryon_service': ' 🪞 VTON ',
-        'utils.image_processing.face_injector': ' 🪞 VTON ',
         'api.routers.virtual_tryon': ' 🪞 VTON ',
         
         # API Routers
@@ -54,7 +53,6 @@ class ColoredFormatter(logging.Formatter):
         
         # Utils related
         'utils.image_processing.background_removal': ' 🛠️ UTILS ',
-        'utils.logging.cost_tracking': ' 💰 COST ',
         'utils.image_processing.create_image_grid': ' 🖼️ GRID ',
         'utils.response_handler_utils': ' 🛠️ UTILS ',
         'utils.search_client_utils': ' 🛠️ UTILS ',
@@ -88,15 +86,22 @@ class ColoredFormatter(logging.Formatter):
         color = self.COLORS.get(record.levelname, self.COLORS['RESET'])
         reset = self.COLORS['RESET']
         
-        # Special handling for COST messages - don't show [COST] prefix if message already contains cost info
-        if prefix == ' 💰 COST ' and (message.startswith('•') or message.startswith('[COST]')):
-            # Remove [COST] from message if present and just show the content
-            if message.startswith('[COST]'):
-                message = message[6:].strip()
-            return f"{color}{message}{reset}"
-        
-        # Disable prefix for now - just return colored message
+        # Disable special cost handling
         return f"{color}{message}{reset}"
+
+
+class SubstringFilter(logging.Filter):
+    """Filter out records containing any forbidden substrings."""
+    def __init__(self, forbidden: list[str]) -> None:
+        super().__init__()
+        self.forbidden = tuple(forbidden)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        return not any(sub in msg for sub in self.forbidden)
 
 
 def setup_logging(level=logging.INFO):
@@ -104,6 +109,12 @@ def setup_logging(level=logging.INFO):
     # Create custom handler with colored formatter
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(ColoredFormatter('%(message)s\n'))
+    # Drop specific noisy lines printed by some SDKs
+    handler.addFilter(SubstringFilter([
+        "AFC is enabled", 
+        "AFC remote call",
+        "Agent Function Calling",
+    ]))
     
     # Configure basic logging
     logging.basicConfig(
@@ -113,15 +124,44 @@ def setup_logging(level=logging.INFO):
     
     # Silence noisy third-party loggers by default
     # Note: We silence "openai._base_client" but NOT "clients.openai_client" 
-    for noisy_logger in ("httpx", "httpcore", "openai._base_client", "openai.resources", "urllib3", "insightface", "onnxruntime", "opencv", "cv2"):
-        nl = logging.getLogger(noisy_logger)
-        nl.setLevel(logging.WARNING)
+    noisy_loggers = (
+        # HTTP clients
+        "httpx", "httpcore", "urllib3",
+        
+        # OpenAI SDK internals
+        "openai._base_client", "openai.resources",
+        
+        # Vision / CV libs
+        "insightface", "onnxruntime", "opencv", "cv2",
+        
+        # Google / Gemini SDK + gRPC
+        "google", "google.genai", "google.api_core", "google.cloud", "google.auth", "google.protobuf",
+        "grpc", "absl"
+    )
+    for name in noisy_loggers:
+        nl = logging.getLogger(name)
+        # Make gRPC extra quiet
+        if name == "grpc":
+            nl.setLevel(logging.ERROR)
+        elif name in ("google.genai",):
+            nl.setLevel(logging.ERROR)
+        else:
+            nl.setLevel(logging.WARNING)
         nl.propagate = False
+
+    # Further reduce absl log verbosity if present
+    try:
+        import absl.logging as absl_logging  # type: ignore
+        absl_logging.set_verbosity(absl_logging.ERROR)
+        absl_logging.use_python_logging()
+    except Exception:
+        pass
     
     # Make sure our openai client logger works
     openai_client_logger = logging.getLogger('clients.openai_client')
     openai_client_logger.setLevel(level)
     openai_client_logger.propagate = True
+
 
 
 def test_log_prefixes():
@@ -136,7 +176,6 @@ def test_log_prefixes():
         'CONFIG': logging.getLogger('_config.master_config'),
         'OUTFIT_GEN': logging.getLogger('services.outfit_generation_service'),
         'UTILS_BG': logging.getLogger('utils.image_processing.background_removal'),
-        'COST': logging.getLogger('utils.logging.cost_tracking'),
         'OUTFIT_RESP': logging.getLogger('services.outfit_generation_service'),
         'USERS_ROUTER': logging.getLogger('api.routers.users'),
         'TESTING_ROUTER': logging.getLogger('api.routers.testing'),

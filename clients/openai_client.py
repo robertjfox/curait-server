@@ -1,32 +1,21 @@
 import openai
 import os
 import logging
-from typing import Dict, Any, List, Optional, Callable, Tuple
+from typing import Dict, Any, List, Optional, Callable
 import _config as config
-import asyncio
 import json
 import httpx
-import base64
-import uuid
-from PIL import Image
-
-# Google Gemini SDK
-try:
-    from google import genai
-    GEMINI_AVAILABLE = True
-except ImportError:
-    GEMINI_AVAILABLE = False
-    genai = None
+from datetime import datetime, timezone
+import time
 
 # Prompts
 from ai.prompts.generate_outfits import generate_outfit_prompts
 from ai.prompts.product_ranking_binary import build_product_ranking_prompt
-from ai.prompts.conversation_decisions import generate_outfit_decision_prompt, generate_chat_system_prompt
-from ai.prompts.virtual_tryon import generate_virtual_tryon_prompt
+from ai.prompts.prompt_suggestions import build_prompt_suggestions_messages
 
 # Schemas
 from ai.schemas.outfits import generate_outfit_schema
-from ai.schemas.conversation_decision import generate_conversation_user_intent_schema
+from ai.schemas.prompt_suggestions import generate_prompt_suggestions_schema
 
 # Streaming/Parsing utils
 from utils.response_handler_utils import (
@@ -36,23 +25,12 @@ from utils.response_handler_utils import (
 # Models
 from _config.model_config import (
     OUTFIT_GENERATION,
-    PRODUCT_RANKING,
-    CHAT_MODEL,
-    CONVERSATION_DECISION,
-    VIRTUAL_TRY_ON,
+    PRODUCT_RANKING,    
     TITLE_GENERATION,       
+    PROMPT_SUGGESTIONS,
 )
-from clients.supabase_client import get_supabase_client
-from interfaces.outfits_interface import OutfitsInterface
-from utils.logging.cost_tracking import cost_logger
 
 logger = logging.getLogger(__name__)
-
-# -----------------------------
-# Flatlay image provider selection
-# -----------------------------
-# Allowed values: "OPENAI" or "GOOGLE" (Gemini API)
-FLATLAY_IMAGE_PROVIDER = (os.getenv("FLATLAY_IMAGE_PROVIDER", "GOOGLE").strip().upper())
 
 class OpenAIClient:
     """Simple centralized OpenAI client (direct OpenAI calls; no wrappers)."""
@@ -71,146 +49,6 @@ class OpenAIClient:
             timeout=timeout
         )
 
-    # -----------------------------
-    # Flatlay rendering helpers (non-blocking)
-    # -----------------------------
-
-    async def _generate_flatlay_and_upload(self, outfit: Dict[str, Any], *, thread_id: Optional[str] = None) -> Optional[str]:
-        """Dress the person in _assets/user_full_body.png with the outfit and upload the edited image. Returns the public URL or None."""
-        import time
-        start_time = time.time()
-        outfit_name = outfit.get("name", "Unknown Outfit")
-        
-        try:
-            # Virtual try-on prompt
-            edit_prompt = (
-                "Dress the person in the provided user image using ONLY the items from this outfit JSON. "
-                "Ensure realistic fit, correct layering and occlusion, consistent lighting, and natural shadows. "
-                "No text or logos. Keep the background and person identity the same.\n\n"
-                f"Outfit JSON:\n{json.dumps(outfit, ensure_ascii=False)}"
-            )
-
-            gen_start = time.time()
-
-            image_bytes: Optional[bytes] = None
-
-            if FLATLAY_IMAGE_PROVIDER in ("GOOGLE", "GEMINI", "GOOGLE_GEMINI"):
-                # Generate with Google Gemini 2.5 Flash Image, passing the base user image for editing
-                if not GEMINI_AVAILABLE:
-                    logger.error("Google Gemini SDK not available. Install with: pip install google-genai")
-                    return None
-
-                def _call_gemini_vton() -> Optional[bytes]:
-                    try:
-                        google_api_key = os.getenv("GOOGLE_API_KEY")
-                        client = genai.Client(api_key=google_api_key)
-
-                        user_img_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "_assets", "user_full_body.png"))
-                        try:
-                            base_image = Image.open(user_img_path)
-                            resp = client.models.generate_content(
-                                model="gemini-2.5-flash-image-preview",
-                                contents=[edit_prompt, base_image],
-                            )
-                        except Exception:
-                            # Fallback to text-only if the file isn't available
-                            resp = client.models.generate_content(
-                                model="gemini-2.5-flash-image-preview",
-                                contents=[edit_prompt],
-                            )
-
-                        for part in resp.candidates[0].content.parts:
-                            if getattr(part, "inline_data", None):
-                                return part.inline_data.data
-                        return None
-                    except Exception as e:
-                        logger.warning(f"Gemini image generation error: {e}")
-                        return None
-
-                image_bytes = await asyncio.to_thread(_call_gemini_vton)
-            else:
-                # OpenAI fallback: prompt-based image generation (no edit input)
-                response = await self.client.images.generate(
-                    model="gpt-image-1",
-                    prompt=edit_prompt,
-                    size="1024x1024",
-                    quality="low",
-                    output_format="jpeg",
-                    output_compression=30,
-                )
-                b64 = response.data[0].b64_json if response and getattr(response, 'data', None) else None
-                image_bytes = base64.b64decode(b64) if b64 else None
-            
-            # Track try-on generation cost (reuse flatlay tracker for now)
-            cost_logger.track_flatlay_gen(thread_id)
-            
-            gen_time = time.time() - gen_start
-            
-            if not image_bytes:
-                logger.warning(f"❌ No image data received for '{outfit_name}'")
-                return None
-
-            upload_start = time.time()
-
-            # Choose filename and content-type based on bytes signature
-            mime_type, ext = self._detect_image_mime_and_ext(image_bytes)
-            filename = f"outfit_tryon_{uuid.uuid4().hex}{ext}"
-            bucket = (config.model_config.FLATLAY_RENDERING["bucket"] if hasattr(config, 'model_config') else "outfit-flatlay-images")
-
-            supabase = get_supabase_client()
-            supabase.storage.from_(bucket).upload(
-                path=filename,
-                file=image_bytes,
-                file_options={"content-type": mime_type},
-            )
-            public_url = supabase.storage.from_(bucket).get_public_url(filename)
-            
-            upload_time = time.time() - upload_start
-            total_time = time.time() - start_time
-            logger.info(f"✅ Try-on complete for '{outfit_name}': {gen_time:.2f}s gen + {upload_time:.2f}s upload = {total_time:.2f}s total")
-            
-            return public_url
-        except Exception as e:
-            total_time = time.time() - start_time
-            logger.warning(f"❌ Try-on generation failed for '{outfit_name}' after {total_time:.2f}s: {e}")
-            return None
-
-    def _launch_flatlay_tasks(
-        self,
-        outfits: List[Dict[str, Any]],
-        *,
-        thread_id: Optional[str] = None,
-        outfit_ids: Optional[List[str]] = None,
-    ) -> List[asyncio.Task]:
-        """Spawn background tasks to render flatlays for outfits. Updates JSON and DB when available. Returns task handles."""
-        outfits_interface = OutfitsInterface()
-
-        async def _task(ix: int, outfit: Dict[str, Any], outfit_id: Optional[str]) -> None:
-            try:
-                url = await self._generate_flatlay_and_upload(outfit, thread_id=thread_id)
-                if not url:
-                    return
-                # Update in-memory structure
-                outfit["default_rendering_url"] = url
-                # Persist if we have an outfit_id
-                if outfit_id:
-                    try:
-                        outfits_interface.update_default_rendering_url(outfit_id, url)
-                    except Exception:
-                        pass
-            except Exception as e:
-                logger.warning(f"Flatlay task error for outfit {ix}: {e}")
-
-        tasks: List[asyncio.Task] = []
-        for i, outfit in enumerate(outfits):
-            oid = outfit_ids[i] if outfit_ids and i < len(outfit_ids) else None
-            tasks.append(asyncio.create_task(_task(i, outfit, oid)))
-        return tasks
-
-    # -----------------------------
-    # High-level flows (simple APIs)
-    # -----------------------------
-
     async def generate_outfits_flow(
         self,
         *,
@@ -218,12 +56,13 @@ class OpenAIClient:
         user_data: Dict[str, Any],
         conversation_history: List[Dict[str, Any]] = [],
         outfit_history: List[Dict[str, Any]] = [],
-        on_keyword: Optional[Callable[[str], Any]] = None,
-        thread_id: Optional[str] = None,
+        on_outfits: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
     ) -> None:
         
         schema = generate_outfit_schema(queue_multiplier)
         messages = generate_outfit_prompts(user_data, outfit_history, conversation_history, queue_multiplier)
+
+        start_time = time.time()
 
         stream = await self.client.chat.completions.create(
             model=OUTFIT_GENERATION["model"],
@@ -233,25 +72,15 @@ class OpenAIClient:
             stream_options={"include_usage": True},
         )
 
-        outfits_full_json, usage = await process_streaming_outfit_response(
+        res = await process_streaming_outfit_response(
             stream,
-            on_keyword=on_keyword,
+            on_outfits=on_outfits,
+            start_time=start_time,
+            grid_size=config.NUM_OUTFITS_IN_GRID,
         )
 
-        # Track cost using usage from final stream chunk if available
-        if usage and thread_id:
-            # Create a lightweight object interface for calculate_openai_cost_cents
-            class _UsageWrapper:
-                def __init__(self, model: str, usage_obj: Any):
-                    self.model = OUTFIT_GENERATION["model"]
-                    self.usage = usage_obj
-            from utils.logging.cost_tracking import cost_logger, calculate_openai_cost_cents
-            wrapper = _UsageWrapper(OUTFIT_GENERATION["model"], usage)
-            cents = calculate_openai_cost_cents(wrapper)
-            if cents:
-                cost_logger.track_outfit_gen(thread_id, cost_cents=cents)
+        return res
 
-        return outfits_full_json
 
     async def rank_products_flow(
         self,
@@ -297,9 +126,6 @@ class OpenAIClient:
             top_p=1,
         )
         
-        # Track ranking cost
-        cost_logger.track_ranking(thread_id, response=resp)
-        
         resp_obj = resp
 
         try:
@@ -311,72 +137,11 @@ class OpenAIClient:
 
         return ratings
 
-    async def generate_chat_response_flow(
-        self,
-        *,
-        conversation_history: List[Dict[str, str]],
-        user_data: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        system_prompt = generate_chat_system_prompt(user_data, {})
-        messages = [{"role": "system", "content": system_prompt}]
-        messages.extend(conversation_history[-10:])
-        response = await self.client.chat.completions.create(
-            model=CHAT_MODEL["model"],
-            messages=messages,
-        )
-        return {"content": (response.choices[0].message.content or ""), "model": CHAT_MODEL["model"]}
-
-    async def conversation_user_intent_flow(
-        self,
-        *,
-        user_message: str,
-        conversation_history: List[Dict[str, str]],
-    ) -> str:
-        recent_messages = conversation_history[-5:] if conversation_history else []
-        prompt = generate_outfit_decision_prompt(user_message, recent_messages, {})
-        result = await self.client.chat.completions.create(
-            model=CONVERSATION_DECISION["model"],
-            messages=[{"role": "user", "content": prompt}],
-            response_format=generate_conversation_user_intent_schema(),
-        )
-        try:
-            decision_data = json.loads((result.choices[0].message.content or "{}"))
-            return decision_data.get("decision", "CHAT")
-        except Exception:
-            return "CHAT"
-
-    async def virtual_tryon_flow(
-        self,
-        *,
-        image: Any,
-        gender: Optional[str] = None,
-        user_data: Optional[Dict[str, Any]] = None,
-        thread_id: Optional[str] = None,
-    ) -> Any:
-        """Build prompt and call image edit API for virtual try-on. Returns raw API response for caller to process image bytes/URL."""
-        prompt = generate_virtual_tryon_prompt(
-            gender=(gender or "female"),
-            user_data=user_data,
-        )
-        response = await self.client.images.edit(
-            model=VIRTUAL_TRY_ON["model"],
-            image=image,
-            prompt=prompt,
-            size=VIRTUAL_TRY_ON["size"],
-            quality=VIRTUAL_TRY_ON["quality"],
-            input_fidelity=VIRTUAL_TRY_ON["input_fidelity"],
-            n=VIRTUAL_TRY_ON["n"],
-        )
-        
-        # Note: VTON cost tracking disabled for now as requested
-        
-        return response
-
     async def generate_title_flow(self, *, first_user_message: str) -> str:
         """Return a short, creative thread title for the first user message."""
         prompt = (
             "Create a concise, catchy title (max 3-5 words) for this conversation. "
-            "For context this is a AI virtual stylist application. The title should relect that."
+            "For context this is a AI virtual stylist application. The title should reflect the user's intent for the styling session."
             "Avoid quotes and punctuation-heavy output.\n\n"
             f"Message: {first_user_message}"
         )
@@ -387,34 +152,57 @@ class OpenAIClient:
             )
             content = response.choices[0].message.content or ""
             # Sanitize line breaks / quotes
-            return (content.strip().replace("\n", " ").strip().strip('"').strip("'") or "New Thread")
+            return (content.strip().replace("\n", " ").strip().strip('"').strip("'").strip() or "New Thread")
         except Exception:
             return "New Thread"
 
-    # -----------------------------
-    # Internal helpers
-    # -----------------------------
-    # (Removed _generate_flatlay_image_bytes; generation now inlined in _generate_flatlay_and_upload)
-
-    @staticmethod
-    def _detect_image_mime_and_ext(image_bytes: bytes) -> Tuple[str, str]:
-        """Best-effort sniffing of image mime and extension from header bytes."""
-        if not image_bytes:
-            return ("image/jpeg", ".jpg")
-        header = image_bytes[:12]
-        # JPEG
-        if header.startswith(b"\xFF\xD8"):
-            return ("image/jpeg", ".jpg")
-        # PNG
-        if header.startswith(b"\x89PNG"):
-            return ("image/png", ".png")
-        # WEBP: RIFF....WEBP
-        if header.startswith(b"RIFF") and header[8:12] == b"WEBP":
-            return ("image/webp", ".webp")
-        return ("image/jpeg", ".jpg")
-
-
-# Convenience function
+    async def generate_prompt_suggestions(
+        self,
+        *,
+        user_data: Dict[str, Any],
+        first_messages: List[str],
+        existing_prompts: List[str] = None,
+    ) -> List[str]:
+        """Return 4 short, one-sentence prompt suggestions tailored to the user."""
+        msgs = build_prompt_suggestions_messages(user_data, first_messages, existing_prompts)
+        schema = generate_prompt_suggestions_schema()
+        try:
+            response = await self.client.chat.completions.create(
+                model=PROMPT_SUGGESTIONS["model"],
+                messages=msgs,
+                response_format=schema,
+            )
+            content = response.choices[0].message
+            # Expect JSON tool output under response_format, similar to other flows
+            # The AsyncOpenAI json response embeds content in message.content when using response_format
+            parsed = None
+            try:
+                parsed = json.loads(content.content)
+            except Exception:
+                # Some SDKs place JSON under message.parsed if using structured mode
+                parsed = getattr(content, "parsed", None)
+            prompts = (parsed or {}).get("prompts") if isinstance(parsed, dict) else None
+            if not prompts or not isinstance(prompts, list):
+                raise ValueError("No prompts returned")
+            # Sanitize and enforce length/formatting
+            cleaned: List[str] = []
+            for p in prompts[:4]:
+                s = (p or "").strip().replace("\n", " ")
+                s = s.strip('"').strip("'").strip()
+                if len(s) > 75:
+                    # Truncate at word boundary to avoid cutting mid-word
+                    s = s[:75].rstrip()
+                    # Find last space to avoid cutting mid-word
+                    last_space = s.rfind(' ')
+                    if last_space > 60:  # Only truncate at word boundary if we have reasonable length
+                        s = s[:last_space].rstrip()
+                cleaned.append(s)
+            while len(cleaned) < 4:
+                cleaned.append("Show me versatile outfits for this week")
+            return cleaned[:4]
+        except Exception as e:
+            logger.warning(f"Prompt suggestions failed, falling back: {e}")
+            return []
 
 
 def get_openai_client() -> OpenAIClient:

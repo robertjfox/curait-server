@@ -51,7 +51,7 @@ async def _download_image_with_client(client: httpx.AsyncClient, url: str) -> Op
         img = img.convert("RGB")
         return img
     except Exception as e:
-        logger.warning(f"Failed to download image from {url} {e}")
+        logger.warning(f"Failed to download image")
         return None
 
 def _fit_into_cell(img: Image.Image, cell_size: Tuple[int, int], max_fill: bool = True) -> Image.Image:

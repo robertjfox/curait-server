@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List
 import logging
 from collections import deque
 import asyncio
@@ -14,9 +14,6 @@ import _config as config
 from clients.openai_client import get_openai_client
 
 logger = logging.getLogger(__name__)
-
-QUEUE_MULTIPLIER = 3
-QUEUE_PULL_COUNT = 1
 class ThreadService:
     """Simplified service for managing conversational styling threads."""
     
@@ -48,16 +45,15 @@ class ThreadService:
         """Main entry point for styling conversations."""
         try:
 
-            # Non-blocking: try to generate a creative title from the first message
-            asyncio.create_task(self._generate_title_task(thread_id, user_message))
-
-            # Get user data
             thread = self.threads_interface.get(thread_id)
+            thread_title = thread.get("title", "Thread Title")
 
-            # get the user data
+            # if the thread has no title, or its "Thread Title" generate one
+            if not thread_title or thread_title == "Thread Title":
+                asyncio.create_task(self._generate_title_task(thread_id, user_message))
+
             user_data = self.users_interface.get_relevant_context(thread["user_id"]) if thread else {}
-            
-            # Save user message
+
             self.messages_interface.create(
                 thread_id=thread_id,
                 role="user",
@@ -66,9 +62,9 @@ class ThreadService:
             )
 
             conversation_history = self.messages_interface.get_conversation_history(thread_id)
+
             outfit_history = self.outfits_interface.get_thread_outfit_history(thread_id)
 
-            # CREATE: add assistant message with metadata about the outfit generation
             assistant_msg_id = self.messages_interface.create(
                 thread_id=thread_id,
                 role="assistant",
@@ -81,10 +77,12 @@ class ThreadService:
 
             use_quque_multiplier = True
 
-            # update the cache with the message id... this is all we have to do
             if "more outfits" in user_message.lower():
                 use_quque_multiplier = False
-                self.threads_interface.update_thread_outfits_with_no_message_id(thread_id, assistant_msg_id, QUEUE_PULL_COUNT)
+                self.threads_interface.update_thread_outfits_with_no_message_id(thread_id, assistant_msg_id, 1)
+
+            else:
+                self.threads_interface.delete_thread_outfits_with_no_message_id(thread_id)
 
             await self._generate_styling_response(
                 thread_id=thread_id,
@@ -95,16 +93,10 @@ class ThreadService:
                 use_quque_multiplier=use_quque_multiplier,
             )
                 
-
-                
         except Exception as e:
             logger.error(f"Chat with styling failed: {e}")
             raise
 
-
-    # -----------------------------
-    # Main flow
-    # -----------------------------
 
     async def _generate_styling_response(
         self,
@@ -117,59 +109,24 @@ class ThreadService:
     ) -> Dict[str, Any]:
         """Generate a styling response with outfits."""
         try:
-            num_outfits = config.NUM_OUTFITS_TO_GENERATE
-            num_items = config.NUM_ITEMS_PER_OUTFIT
+            queue_multiplier = config.QUEUE_MULTIPLIER if use_quque_multiplier else 1
 
-            queue_multiplier = QUEUE_MULTIPLIER if use_quque_multiplier else 1
-
-            outfit_ids, item_db_ids = self.outfits_interface.create_outfits_and_items(
-                thread_id=thread_id,
-                assistant_msg_id=assistant_msg_id,
-                num_outfits=num_outfits,
-                num_items=num_items,
-                queue_multiplier=queue_multiplier,
-            )
-
-            logger.info(f"🧵 Created {len(outfit_ids)} outfits and {len(item_db_ids)} items")
-
-            item_ids_deque = deque(item_db_ids)
-
-            # generate the outfits
-            new_outfits = await self.openai_client.generate_outfits_flow(
+            res = await self.openai_client.generate_outfits_flow(
                 queue_multiplier=queue_multiplier,
                 user_data=user_data,
                 conversation_history=conversation_history,  
                 outfit_history=outfit_history,
-                thread_id=thread_id,
-                on_keyword=lambda kw: asyncio.create_task(
-                    self.outfit_generation_service._process_single_item(
-                        item_id=item_ids_deque.popleft(),
-                        keywords=kw,
-                        user_data=user_data,
+                on_outfits=lambda outfits: asyncio.create_task(
+                    self.outfit_generation_service.process_multiple_outfits(
+                        outfits=outfits,
                         thread_id=thread_id,
+                        user_gender=user_data.get("gender"),
+                        assistant_msg_id=assistant_msg_id,
                     )
                 ),
             )
-
-            # update the outfits with the metadata
-            self.outfits_interface.update_multiple_outfits_metadata(
-                outfit_metadata=new_outfits,
-                outfit_ids=outfit_ids,
-                item_db_ids=item_db_ids,    
-                num_items=num_items,
-            )
-
-
-            # Generate flatlays for current outfits (fire-and-forget)
-            self.openai_client._launch_flatlay_tasks(
-                new_outfits.get("outfits", []),
-                thread_id=thread_id,
-                outfit_ids=outfit_ids,
-            )
-
-            logger.info(f"✅ Completed styling response!")
-
-            return new_outfits
+                        
+            return {"success": True}
 
         except Exception as e:
             logger.error(f"Failed to generate styling response: {e}")

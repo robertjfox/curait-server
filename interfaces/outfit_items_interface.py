@@ -16,14 +16,13 @@ class OutfitItemsInterface:
         outfit_id: str,
         type: str,
         keywords: Optional[str] = None,
-        search_results: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[str]:
         """Create a new outfit item and return its ID."""
         payload: Dict[str, Any] = {
             "outfit_id": outfit_id,
             "type": type,
             "keywords": keywords,
-            "search_results": search_results or [],
+            "search_results": [],
         }
         try:
             res = self._supabase.table(self._table).insert(payload).execute()

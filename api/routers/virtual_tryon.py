@@ -5,45 +5,36 @@ import time
 
 from models import VirtualTryOnRequest, VirtualTryOnResponse
 from services.virtual_tryon_service import VirtualTryOnService
-from interfaces.users_interface import UsersInterface
 from interfaces.outfits_interface import OutfitsInterface
 from interfaces.outfit_items_interface import OutfitItemsInterface
-from interfaces.threads_interface import ThreadsInterface
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["virtual-try-on"])
 
 virtual_tryon_service = VirtualTryOnService()
-users_interface = UsersInterface()
 outfits_interface = OutfitsInterface()
 outfit_items_interface = OutfitItemsInterface()
-threads_interface = ThreadsInterface()
 
 
 @router.post("/virtual-try-on", response_model=VirtualTryOnResponse)
 async def virtual_try_on(request: VirtualTryOnRequest):
     try:
-        # Fetch user data
-        user_data = users_interface.get_relevant_context(request.user_id)
-        if not user_data:
-            raise HTTPException(status_code=404, detail="User not found")
+        # Prepare products from thumbnail URLs
+        if not request.thumbnails:
+            raise HTTPException(status_code=400, detail="No thumbnails provided for virtual try-on")
         
-        # Add user_id to user_data for face overlay functionality
-        user_data["id"] = request.user_id
-        
-        # Fetch outfit items to get products
-        outfit_items = outfit_items_interface.get_by_outfit(request.outfit_id)
-        if not outfit_items:
-            raise HTTPException(status_code=404, detail="Outfit not found or has no items")
-        
-        # Find products from search results in outfit items
         item_products = []
-        for i, item in enumerate(outfit_items):
-            search_results = item.get("search_results", [])
+        
+        # If we have outfit_id, lookup item types from outfit items
+        if request.outfit_id:
+            outfit_items = outfit_items_interface.get_by_outfit(request.outfit_id)
+            url_to_type = {}
             
-            for j, product in enumerate(search_results):
-                if product.get("productId") in request.product_ids:
-                    # Try multiple possible image field names
+            # Build mapping of image URLs to item types
+            for item in outfit_items:
+                item_type = item.get("type", "Item")
+                search_results = item.get("search_results", [])
+                for product in search_results:
                     image_url = (
                         product.get("imageUrl") or 
                         product.get("thumbnail") or 
@@ -51,37 +42,44 @@ async def virtual_try_on(request: VirtualTryOnRequest):
                         product.get("serpapi_thumbnail") or
                         ""
                     )
-                    
-                    if not image_url:
-                        logger.error(f"❌ Product {product.get('title', 'Unknown')} has no image URL")
-                        continue
-                    
-                    item_products.append({
-                        "imageUrl": image_url,
-                        "title": product.get("title", f"Item {len(item_products) + 1}")
-                    })
-                else:
-                    logger.debug(f"🔍 Product ID {product.get('productId')} not in requested IDs")
+                    if image_url:
+                        url_to_type[image_url] = item_type
+            
+            # Match thumbnails to types
+            for i, image_url in enumerate(request.thumbnails):
+                if not image_url:
+                    continue
+                item_type = url_to_type.get(image_url, f"Item {i + 1}")
+                item_products.append({
+                    "imageUrl": image_url,
+                    "title": item_type
+                })
+        else:
+            # No outfit_id, use generic labels
+            for i, image_url in enumerate(request.thumbnails):
+                if not image_url:
+                    continue
+                item_products.append({
+                    "imageUrl": image_url,
+                    "title": f"Item {i + 1}"
+                })
         
         if not item_products:
-            raise HTTPException(status_code=400, detail="No valid products found for the provided product IDs")
+            raise HTTPException(status_code=400, detail="No valid thumbnails provided")
         
-        logger.info(f"🎯 Starting VTON with {len(item_products)} products for user {request.user_id}")
+        logger.info(f"🎯 Starting VTON with {len(item_products)} products")
         
-        result = await virtual_tryon_service.generate_virtual_tryon(
-            item_products=item_products,
-            gender=user_data.get("gender"),
-            user_data=user_data,
-            thread_id=request.thread_id,
-            user_id=request.user_id,
-        )
+        result = await virtual_tryon_service.generate_virtual_tryon(item_products=item_products)
         
         # Extract image URL from service result
         image_url = result.get("image_url", "")
         
-        # Save VTON image URL to outfit record
-        if image_url:
-            outfits_interface.update_vton_image(request.outfit_id, image_url)
+        # Save VTON image URL to outfit record if provided
+        if image_url and request.outfit_id:
+            try:
+                outfits_interface.update_vton_image(request.outfit_id, image_url)
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to persist VTON URL to outfit {request.outfit_id}: {e}")
         
         return VirtualTryOnResponse(image_url=image_url)
         

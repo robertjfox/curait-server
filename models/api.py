@@ -14,7 +14,13 @@ class ThreadChatRequest(BaseModel):
 
 class VirtualTryOnRequest(BaseModel):
     user_id: str
-    outfit_id: str
-    product_ids: List[str]  # Search result product IDs
     thread_id: str
+    thumbnails: List[str]  # Flat array of image URLs
+    outfit_id: Optional[str] = None
+
+
+class PromptSuggestionsResponse(BaseModel):
+    success: bool
+    user_id: str
+    prompts: List[str]
 

@@ -10,12 +10,5 @@ Pillow
 supabase
 tiktoken
 psutil
-# Face swapping dependencies
-insightface>=0.7.3
-onnxruntime>=1.16.0
-opencv-python-headless>=4.8.0
-numpy>=1.24.0
-# mediapipe>=0.10.0  # Optional - enables pose-based cropping for better results
-# Face restoration dependencies removed - not needed
 google-generativeai>=0.8.0
 google-genai>=1.0.0

@@ -71,4 +71,23 @@ class MessagesInterface:
         except Exception:
             return []
 
+    def get_first_user_message(self, thread_id: str) -> Optional[str]:
+        """Return the first user-authored message content for this thread, or None."""
+        try:
+            res = (
+                self._supabase.table(self._table)
+                .select("role, content")
+                .eq("thread_id", thread_id)
+                .eq("role", "user")
+                .order("created_at")
+                .limit(1)
+                .execute()
+            )
+            rows = res.data or []
+            if rows:
+                return rows[0].get("content")
+            return None
+        except Exception:
+            return None
+
 

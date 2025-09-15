@@ -1,6 +1,5 @@
 import os
 from dotenv import load_dotenv
-from utils.logging.cost_tracking import cost_logger
 
 load_dotenv(override=True)
 
@@ -15,8 +14,10 @@ CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 
 # Outfit Generation
 SHOPPING_RESULTS_TO_RETURN = int(os.getenv("SHOPPING_RESULTS_TO_RETURN", "10"))
-NUM_OUTFITS_TO_GENERATE = int(os.getenv("NUM_OUTFITS_TO_GENERATE", "1"))
-NUM_ITEMS_PER_OUTFIT = int(os.getenv("NUM_ITEMS_PER_OUTFIT", "1"))
+
+NUM_OUTFITS_IN_GRID = int(os.getenv("NUM_OUTFITS_IN_GRID", "3"))
+NUM_ITEMS_PER_OUTFIT = int(os.getenv("NUM_ITEMS_PER_OUTFIT", "5"))
+QUEUE_MULTIPLIER = int(os.getenv("QUEUE_MULTIPLIER", "2"))
 
 # Shopping Configuration
 SHOPPING_MIN_PRICE = int(os.getenv("SHOPPING_MIN_PRICE", "40"))
@@ -53,7 +54,6 @@ OPENAI_POOL_TIMEOUT = float(os.getenv("OPENAI_POOL_TIMEOUT", "60.0"))  # Pool ti
 
 VTON_ENABLED = os.getenv("VTON_ENABLED", "true").lower() in ("1", "true", "yes", "on")
 FACE_SWAP_ENABLED = os.getenv("FACE_SWAP_ENABLED", "true").lower() in ("1", "true", "yes", "on")
-ENABLE_COST_LOGGING = os.getenv("ENABLE_COST_LOGGING", "true").lower() in ("1", "true", "yes", "on")
 ENABLE_PROMPT_LOGGING = os.getenv("ENABLE_PROMPT_LOGGING", "false").lower() in ("1", "true", "yes", "on")
 
 # Blocked sources for search filtering
@@ -69,6 +69,3 @@ FACE_MIN_CONFIDENCE = float(os.getenv("FACE_MIN_CONFIDENCE", "0.5"))  # Minimum 
 # InsightFace Model Storage
 # Set to persistent volume path on Railway: /data/insight_cache
 INSIGHTFACE_HOME = os.getenv("INSIGHTFACE_HOME", os.path.expanduser("~/.insightface"))
-
-# Global cost logger instance
-cost_logger = cost_logger

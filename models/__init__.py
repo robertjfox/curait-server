@@ -24,6 +24,7 @@ from .api import (
     ThreadCreateRequest,
     ThreadChatRequest,
     VirtualTryOnRequest,
+    PromptSuggestionsResponse,
 )
 
 # No separate streaming models - use stylist models
@@ -49,5 +50,5 @@ __all__ = [
     "VirtualTryOnResponse", "VirtualTryOnStreamingResult",
     
     # API models
-    "ThreadCreateRequest", "ThreadChatRequest", "VirtualTryOnRequest",
+    "ThreadCreateRequest", "ThreadChatRequest", "VirtualTryOnRequest", "PromptSuggestionsResponse",
 ] 

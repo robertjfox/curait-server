@@ -38,9 +38,6 @@ async def create_thread(request: ThreadCreateRequest):
 @router.post("/{thread_id}/chat")
 async def chat_in_thread(thread_id: str, request: ThreadChatRequest):
     try:
-        logger.info(f"🧵 Chatting in thread {thread_id[:6]}")
-        logger.info(f"🧵 Request: {request}")
-
         await thread_service.route_user_message(
             thread_id=thread_id,
             user_message=request.message,

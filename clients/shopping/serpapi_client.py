@@ -62,8 +62,8 @@ class SerpApiShoppingClient:
                 "hl": "en",
                 "location": "New York, New York, United States",
                 "num": num_to_fetch,
-                # "min_price": min_price,
-                # "max_price": max_price,
+                "min_price": min_price,
+                "max_price": max_price,
                 "json_restrictor": "shopping_results[].{title, product_link, price, source, thumbnail, rating, reviews}"
             }
 
@@ -77,16 +77,13 @@ class SerpApiShoppingClient:
                     resp.raise_for_status()
                     data = resp.json()
 
-                    # Track search cost
-                    _config.cost_logger.track_search(thread_id=thread_id, provider="serpapi")
-                    
                     items = data.get("shopping_results", []) or data.get("inline_shopping_results", [])
                     unfiltered_results_length = len(items)
 
                     items = normalize_serpapi_results(items)
                     
                     # Apply source filtering to ALL results
-                    # items = filter_blocked_sources(items, _config.BLOCKED_SOURCES)
+                    items = filter_blocked_sources(items, _config.BLOCKED_SOURCES)
                     items = filter_by_gender(items, user_gender)
                     
                     # Apply rating filter only if not skipped

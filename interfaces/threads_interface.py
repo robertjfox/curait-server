@@ -46,27 +46,43 @@ class ThreadsInterface:
             return False
 
     def update_thread_outfits_with_no_message_id(self, thread_id: str, message_id: str, queue_pull_count: int) -> bool:
-
         """Get the oldest outfits for a thread id that have no message id and give them the message id, limited by queue_pull_count."""
-
-        logger.info(f"Updating {queue_pull_count} outfits for thread {thread_id} with message id {message_id}")
-
         try:
             # First get the IDs of outfits to update, then update them
             outfits_to_update = self._supabase.table("outfits").select("id").eq("thread_id", thread_id).filter("message_id", "is", "null").order("created_at", desc=False).limit(queue_pull_count).execute()
-            
             if outfits_to_update.data:
                 outfit_ids = [outfit["id"] for outfit in outfits_to_update.data]
                 # Update the selected outfits
                 res = self._supabase.table("outfits").update({"message_id": message_id}).in_("id", outfit_ids).execute()
-                
-                logger.info(f"Updated {len(res.data)} outfits for thread {thread_id} with message id {message_id}")
                 return True
             else:
                 logger.info(f"No outfits found to update for thread {thread_id}")
                 return True
-                
         except Exception as e:
             logger.error(f"Failed to update outfits: {e}")
             return False
+        
+    def delete_thread_outfits_with_no_message_id(self, thread_id: str) -> bool:
+        """Delete all outfits for a thread id that have no message id."""
+        try:
+            self._supabase.table("outfits").delete().eq("thread_id", thread_id).filter("message_id", "is", "null").execute()
+            return True
+        except Exception:
+            return False
+
+    def list_recent_by_user(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Return the most recent threads for a user, newest first."""
+        try:
+            res = (
+                self._supabase
+                    .table(self._table)
+                    .select("*")
+                    .eq("user_id", user_id)
+                    .order("created_at", desc=True)
+                    .limit(limit)
+                    .execute()
+            )
+            return res.data or []
+        except Exception:
+            return []
 

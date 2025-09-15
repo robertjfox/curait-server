@@ -143,11 +143,9 @@ def _add_user_face_overlay(grid: Image.Image, grid_width: int, grid_height: int,
 
 async def compress_thumbnails_to_grid(
         products: List[Dict[str, Any]], 
-        keywords: List[str] = None, 
         cell_size: int = 240, 
         final_max_side: int = 512, 
         jpeg_quality: int = 70,
-        user_data: Optional[Dict[str, Any]] = None
     ) -> Optional[Tuple[bytes, Optional[str]]]:
     """
     Download up to 4 product images, and compress them into a single 2x2 grid JPEG with product titles as labels.
@@ -157,11 +155,9 @@ async def compress_thumbnails_to_grid(
     
     Args:
         products: List of product dicts with 'imageUrl' and 'title' keys
-        keywords: Deprecated - product titles are used as labels instead
         cell_size: Size of each cell in the grid
         final_max_side: Maximum dimension of final grid image
         jpeg_quality: JPEG compression quality (1-100)
-        user_data: User data dict with id for face image lookup
     """
     if not products:
         return None
@@ -247,9 +243,6 @@ async def compress_thumbnails_to_grid(
             line_y = label_y + (line_idx * line_height)
             
             draw.text((line_x, line_y), line, fill=(0, 0, 0), font=font)
-    
-    # Add user face overlay in the center if available
-    grid = _add_user_face_overlay(grid, grid_width, grid_height, user_data)
     
     # Downscale final composite if too large
     w, h = grid.size

@@ -18,7 +18,7 @@ import _config as config
 
 
 def generate_outfit_schema(queue_multiplier: int):
-    num_outfits = config.NUM_OUTFITS_TO_GENERATE * queue_multiplier
+    num_outfits = config.NUM_OUTFITS_IN_GRID * queue_multiplier
     num_items = config.NUM_ITEMS_PER_OUTFIT
     clothing_items = config.CLOTHING_ITEMS
 
@@ -29,7 +29,10 @@ def generate_outfit_schema(queue_multiplier: int):
             "type": {"type": "string", "enum": clothing_items},
             "keywords": {
                 "type": "string",
-                "description": "Single space-delimited keyword string for this clothing item. Must be ONE complete keyword phrase with spaces between words (never commas). Example: 'mens slim fit navy cotton chinos' as ONE string, NOT comma-separated values."
+                "description": "Single space-delimited keyword string for this clothing item. Must be ONE complete keyword phrase with spaces between words (never commas). Example: 'mens slim fit navy cotton chinos' as ONE string, NOT comma-separated values.",
+                "minLength": 30,
+                "maxLength": 60,
+                "pattern": r"^\S+(?: \S+){0,9}$"
             },
         },
         "required": ["type", "keywords"],

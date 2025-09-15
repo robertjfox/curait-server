@@ -1,23 +1,33 @@
+import os
+# Suppress gRPC/absl verbosity before any SDK imports
+os.environ.setdefault("GRPC_VERBOSITY", "ERROR")
+os.environ.setdefault("GRPC_LOG_SEVERITY_LEVEL", "ERROR")
+os.environ.setdefault("GLOG_minloglevel", "3")
+os.environ.setdefault("GLOG_logtostderr", "1")
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
-import os
 from dotenv import load_dotenv
 import _config
 from _config.logging_config import setup_logging
 
-from services.virtual_tryon_service import VirtualTryOnService
-# from utils.image_processing.face_injector import FaceInjector  # Lazy-imported in lifespan
-from api.routers.threads import router as threads_router
-from api.routers.virtual_tryon import router as virtual_tryon_router
-
 
 load_dotenv()
 
-# Configure logging
+# Configure logging early (before importing routers/services)
 setup_logging(level=logging.INFO)  # Temporarily enable debug logging
 logger = logging.getLogger(__name__)
+
+# Delayed imports to ensure logging/env suppression is in effect
+from services.virtual_tryon_service import VirtualTryOnService
+from api.routers.threads import router as threads_router
+from api.routers.virtual_tryon import router as virtual_tryon_router
+from api.routers.prompt_suggestions import router as prompt_suggestions_router
+from api.routers.outfits import router as outfits_router
+
 
 # Initialize services
 virtual_tryon_service = VirtualTryOnService()
@@ -28,19 +38,7 @@ async def lifespan(app: FastAPI):
 	# Startup
 	logger.info("\n\n🚀 🚀 🚀 🚀 🚀 SERVER STARTING UP 🚀 🚀 🚀 🚀 🚀")
 	
-	# Set up InsightFace persistent storage path BEFORE importing FaceInjector
-	if _config.FACE_SWAP_ENABLED:
-		insightface_home = os.getenv("INSIGHTFACE_HOME", os.path.expanduser("~/.insightface"))
-		os.environ["INSIGHTFACE_HOME"] = insightface_home
-		
-		# Preload FaceInjector model at startup to avoid loading delays during requests
-		try:
-			from utils.image_processing.face_injector import FaceInjector
-			FaceInjector.instance()
-		except Exception as e:
-			logger.error(f"❌ Failed to preload FaceInjector model: {e}")
-		
-	
+
 	yield
 	
 	# Shutdown
@@ -60,6 +58,8 @@ app.add_middleware(
 # Register routers
 app.include_router(threads_router)
 app.include_router(virtual_tryon_router)
+app.include_router(prompt_suggestions_router)
+app.include_router(outfits_router)
 
 
 @app.get("/")
@@ -76,6 +76,8 @@ async def detailed_health_check():
 		"endpoints": [
 			"/api/threads",
 			"/api/virtual-try-on",
+			"/api/prompt-suggestions/{user_id}/generate",
+			"/api/outfits/{outfit_id}/search-and-rank",
 		]
 	}
 
