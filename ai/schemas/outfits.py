@@ -5,7 +5,7 @@ import _config as config
 #   "outfits": [
 #     {
 #       "name": "outfit name",
-#       "description": "outfit description", 
+    #   "description": "outfit description", 
 #       "items": [
 #         {"type": "shirt", "keywords": "red leather jacket"},
 #         {"type": "pants", "keywords": "blue suede shoes"},

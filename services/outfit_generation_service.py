@@ -82,11 +82,11 @@ class OutfitGenerationService:
 			rank_time = time.time() - start_time - shop_time
 			self.outfit_items_interface.update_search_results(item_id, results)
 
-			# logger.info(
-			# 	f"🔍 {keywords}\n"
-			# 	f"  🛒 {shop_time:.1f}s | {unranked_results_length} -> {filtered_results_length} res\n"
-			# 	f"  🏆 {rank_time:.1f}s | {ratings}"	
-			# )
+			logger.info(
+				f"🔍 {keywords}\n"
+				f"  🛒 {shop_time:.1f}s | {unranked_results_length} -> {filtered_results_length} res\n"
+				f"  🏆 {rank_time:.1f}s | {ratings}"	
+			)
 			
 		except Exception as e:
 			logger.error(f"Failed to process item with keywords '{keywords}': {e}")
