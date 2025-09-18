@@ -69,7 +69,7 @@ async def virtual_try_on(request: VirtualTryOnRequest):
         
         logger.info(f"🎯 Starting VTON with {len(item_products)} products")
         
-        result = await virtual_tryon_service.generate_virtual_tryon(item_products=item_products)
+        result = await virtual_tryon_service.generate_virtual_tryon(item_products=item_products, user_id=request.user_id)
         
         # Extract image URL from service result
         image_url = result.get("image_url", "")

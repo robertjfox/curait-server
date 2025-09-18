@@ -19,14 +19,14 @@ class VirtualTryOnService:
         self.gemini_client = get_gemini_client()
         self.supabase: Client = create_client(_config.SUPABASE_URL, _config.SUPABASE_KEY)
     
-    async def generate_virtual_tryon(self, item_products: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def generate_virtual_tryon(self, item_products: List[Dict[str, Any]], user_id: str) -> Dict[str, Any]:
         start_time = time.time()
         
         grid_bytes, grid_url = await self._prepare_grid_and_log(item_products)
 
         # Generate with Gemini using just the product grid
         image_bytes = await asyncio.to_thread(
-            lambda: self.gemini_client.generate_virtual_tryon(grid_bytes=grid_bytes)
+            lambda: self.gemini_client.generate_virtual_tryon(grid_bytes=grid_bytes, user_id=user_id)
         )
 
         image_url = await self._upload_and_log(image_bytes, start_time, grid_url)

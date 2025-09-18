@@ -3,7 +3,7 @@ Simple user selfie handler for Supabase Storage.
 """
 
 import logging
-from typing import List
+from typing import List, Optional
 from clients.supabase_client import get_supabase_client
 
 logger = logging.getLogger(__name__)
@@ -28,6 +28,32 @@ def get_user_selfie_url(filename: str) -> str:
         
     except Exception as e:
         logger.error(f"❌ Failed to get selfie URL for {filename}: {e}")
+        raise
+
+
+def get_user_avatar_url(user_id: str) -> str:
+    """
+    Get public URL for a user's full body avatar image from user-avatars bucket.
+    
+    Args:
+        user_id: User ID to look up
+        
+    Returns:
+        Public URL of the avatar image
+        
+    Raises:
+        Exception if user avatar cannot be found or accessed
+    """
+    supabase = get_supabase_client()
+    bucket = "user-avatars"
+    
+    filename = f"{user_id}.png"
+    try:
+        public_url = supabase.storage.from_(bucket).get_public_url(filename)
+        logger.debug(f"🎭 Retrieved user avatar: {filename}")
+        return public_url
+    except Exception as e:
+        logger.error(f"❌ Failed to get avatar URL for {user_id}: {e}")
         raise
 
 

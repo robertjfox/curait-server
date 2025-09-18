@@ -73,11 +73,12 @@ class ThreadService:
 
             thread = self.threads_interface.get(thread_id)
             thread_title = thread.get("title", "Thread Title")
+            user_id = thread.get("user_id") if thread else None
 
             if not thread_title or thread_title == "Thread Title":
                 asyncio.create_task(self._generate_title_task(thread_id, user_message))
 
-            user_data = self.users_interface.get_relevant_context(thread["user_id"]) if thread else {}
+            user_data = self.users_interface.get_relevant_context(user_id) if user_id else {}
 
             self.messages_interface.create(
                 thread_id=thread_id,
@@ -129,7 +130,7 @@ class ThreadService:
                 on_outfit_batch=lambda outfits, outfit_ids: self.gemini_client.launch_flatlay_task(
                     outfits=outfits,
                     outfit_ids=outfit_ids,
-                    user_gender=user_data.get("gender"),
+                    user_id=user_id,
                     thread_id=thread_id,
                 ),
             )

@@ -1,7 +1,8 @@
 import os
 import logging
 from io import BytesIO
-from typing import Union, Tuple
+from typing import Union, Tuple, Optional
+import requests
 
 from PIL import Image, ImageDraw
 
@@ -20,6 +21,28 @@ def to_pil_image(img_input: Union[bytes, str, Image.Image]) -> Image.Image:
         return Image.open(img_input)
     else:
         raise ValueError(f"Unsupported image input type: {type(img_input)}")
+
+
+def load_user_avatar_from_url(avatar_url: str) -> Image.Image:
+    """
+    Load user avatar image from Supabase URL.
+    
+    Args:
+        avatar_url: URL to user avatar image from Supabase
+        
+    Returns:
+        PIL Image object
+        
+    Raises:
+        Exception if image cannot be loaded from URL
+    """
+    try:
+        response = requests.get(avatar_url, timeout=10)
+        response.raise_for_status()
+        return Image.open(BytesIO(response.content))
+    except Exception as e:
+        logger.error(f"🎭 Failed to load avatar from URL {avatar_url}: {e}")
+        raise
 
 
 def prepare_pil_for_upload(img: Image.Image) -> Image.Image:

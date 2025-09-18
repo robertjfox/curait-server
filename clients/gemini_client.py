@@ -2,13 +2,13 @@ import os
 import logging
 from io import BytesIO
 from typing import List, Optional, Dict, Any
-import json
 import asyncio
 import uuid
 import _config as config
 from clients.supabase_client import get_supabase_client
 from interfaces.outfits_interface import OutfitsInterface
-from utils.image_processing.image_gen import prepare_pil_for_upload, detect_image_mime_and_ext, compose_user_images_row, split_row_image_into_cells
+from utils.image_processing.image_gen import prepare_pil_for_upload, detect_image_mime_and_ext, compose_user_images_row, split_row_image_into_cells, load_user_avatar_from_url
+from utils.image_processing.user_selfie_handler import get_user_avatar_url
 from ai.prompts.image_generation import create_flatlay_prompt, create_virtual_tryon_prompt
 import time
 
@@ -82,28 +82,25 @@ class GeminiClient:
 			logger.error(f"Gemini generation error: {e}")
 			return None
 
-	def generate_virtual_tryon(self, *, grid_bytes: bytes) -> Optional[bytes]:
+	def generate_virtual_tryon(self, *, grid_bytes: bytes, user_id: str) -> Optional[bytes]:
 		"""Generate virtual try-on using product grid."""
-		user_img = prepare_pil_for_upload(Image.open("_assets/user_full_body_female.png"))
+		avatar_url = get_user_avatar_url(user_id)
+		user_img = prepare_pil_for_upload(load_user_avatar_from_url(avatar_url))
 		grid_img = prepare_pil_for_upload(Image.open(BytesIO(grid_bytes)))
 		
 		prompt = create_virtual_tryon_prompt()
 		return self._generate_image([prompt, user_img, grid_img])
 
 
-	async def generate_flatlay_and_upload(self, outfits: List[Dict[str, Any]], *, user_gender: Optional[str] = None, thread_id: Optional[str] = None) -> List[Optional[str]]:
+	async def generate_flatlay_and_upload(self, outfits: List[Dict[str, Any]], *, user_id: str, thread_id: Optional[str] = None) -> List[Optional[str]]:
 		"""Generate and upload flatlay images for multiple outfits."""
 		def _generate():
 			# Generate the prompt using the extracted function
 			combined_prompt = create_flatlay_prompt(outfits)
 			
 			try:
-				gender = (user_gender or "").strip().lower()
-				if gender == "male":
-					base_image = Image.open("_assets/user_full_body_male.png")
-				else:
-					base_image = Image.open("_assets/user_full_body_female.png")
-
+				avatar_url = get_user_avatar_url(user_id)
+				base_image = load_user_avatar_from_url(avatar_url)
 				base_image = compose_user_images_row(base_image, len(outfits))
 
 				logger.info(f"Gemini prompt for {len(outfits)} outfits")
@@ -161,13 +158,13 @@ class GeminiClient:
 			outfits: List[Dict[str, Any]], 
 			thread_id: Optional[str] = None, 
 			outfit_ids: Optional[List[str]] = None, 
-			user_gender: Optional[str] = None) -> asyncio.Task:
+			user_id: str) -> asyncio.Task:
 		"""Spawn flatlay generation task for multiple outfits."""
 		outfits_interface = OutfitsInterface()
 
 		async def _task() -> None:
 			logger.debug(f'Generating Image for {len(outfits)} outfits')
-			urls = await self.generate_flatlay_and_upload(outfits, thread_id=thread_id, user_gender=user_gender)
+			urls = await self.generate_flatlay_and_upload(outfits, thread_id=thread_id, user_id=user_id)
 			
 			for i, (outfit, url) in enumerate(zip(outfits, urls)):
 				if url:
