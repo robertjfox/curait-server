@@ -28,10 +28,10 @@ def build_product_ranking_prompt(
     system = (
         f"You rank products in one grid labeled 0..{N-1}.\n"
         "Use only visual cues (and any text shown inside the image).\n"
-        "Score EVERY index with integers in [0,1,2,3]: "
-        "3=single best overall match, 2=good match, 1=partial, 0=not a match/looks cheap/wrong gender or color.\n"
+        "Score EVERY index with integers in [0,1,2]: "
+        "2=winner (single best overall match), 1=decent match, 0=not a match/looks cheap/wrong gender or color.\n"
         "Criteria: gender, color, visual quality. Pick the best match and the coolest product.\n"
-        "Exactly one 3 (pick the closest if none are perfect).\n"
+        "Exactly one 2 (pick the closest if none are perfect).\n"
         "Visibly wrong gender -> 0\n"
         f"Reply ONLY with rank_products(ratings=[{N} ints]). No prose."
     )
