@@ -38,9 +38,9 @@ OUTFIT_GENERATION = {
 # Category: "product_ranking"
 PRODUCT_RANKING = {
     # "model": GPT_4O_MINI,
-    "model": GPT_O4_MINI,
+    # "model": GPT_O4_MINI,
     # "model": GPT_4O,
-    # "model": GPT_4_1,
+    "model": GPT_4_1,
     # "model": GPT_5_MINI,
     # "model": GPT_5_NANO,
 }
