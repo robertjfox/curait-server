@@ -6,16 +6,17 @@ def format_outfit_history(outfit_history: List[Dict[str, Any]]) -> str:
 
     if not outfit_history:
         return ""
+    
+    # remove all outfits whose items have no feedback
+    # outfit_history = [outfit for outfit in outfit_history if any(item.get("feedback") for item in outfit.get("items", []))]
 
-    for outfit in outfit_history[-5:]:
+    for outfit in outfit_history[-10:]:
         title = str(outfit.get("title", "")).strip()
         description = str(outfit.get("description", "")).strip()
         items = outfit.get("items") or []
-        overall_feedback = str(outfit.get("feedback", "")).strip()
 
-        title_suffix = f" ({overall_feedback.upper()})" if overall_feedback else ""
         if title:
-            lines.append(f"{title}{title_suffix}")
+            lines.append(f"{title}")
         # if description:
         #     lines.append(f"- {description}")
 
@@ -38,7 +39,7 @@ def format_outfit_history(outfit_history: List[Dict[str, Any]]) -> str:
             for keyword in keywords:
                 lines.append(f"- {keyword}{item_suffix}")
 
-        if title or description or items or overall_feedback:
+        if title or description or items:
             lines.append("")
 
     while lines and lines[-1] == "":

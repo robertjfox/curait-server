@@ -1,36 +1,43 @@
 import json
+import logging
 from typing import Any, Dict, List
 
+logger = logging.getLogger(__name__)
+
 def build_product_ranking_prompt(
+    *,
     user_data: Dict[str, Any],
     item_context: Dict[str, Any],
     num_results: int,
-    *,
     grid_image_data_uri: str,
+    outfit_row: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
     N = num_results
-    profile = {k: v for k, v in (user_data or {}).items() if k != "context"}
+
+    # Compact background for fewer tokens
     bg = {
-        "user_profile": profile,           # keep lean; or {}
-        "item_context": item_context or {},# e.g., intended_gender, palette, budget_band
-        "N": N,
+        "keywords": item_context.get("keywords") or "",
+        "gender": (user_data.get("gender") or "unspecified").lower(),
+        "num_results": N,
+        "outfit_name": outfit_row.get("name") or "",
+        "outfit_description": outfit_row.get("description") or "",
     }
+    
     bg_json = json.dumps(bg, separators=(",", ":"))
 
     system = (
-        f"You are a vision ranking model for a single grid image labeled 0..{N-1}. "
-        "Use only visual evidence (and any text visible inside the image). "
-        "Rules: rate ALL indices; gender mismatch→1; missing signals=neutral; 0-based indexing. "
-        "Weights: Color=35 Vibe=50 Brand=15"
-        "Try to capture the overall vibe of the user based on their profile info."
-        f"Respond ONLY by calling the function `rank_products` with `ratings` = array of {N} integers in [1,10]. "
-        "Do NOT output text or JSON in assistant content."
+        f"You rank products in one grid labeled 0..{N-1}.\n"
+        "Use only visual cues (and any text shown inside the image).\n"
+        "Score EVERY index with integers in [0,1,2,3]: "
+        "3=single best overall match, 2=good match, 1=partial, 0=not a match/looks cheap/wrong gender or color.\n"
+        "Criteria: gender, color, visual quality. Pick the best match and the coolest product.\n"
+        "Exactly one 3 (pick the closest if none are perfect).\n"
+        "Visibly wrong gender -> 0\n"
+        f"Reply ONLY with rank_products(ratings=[{N} ints]). No prose."
     )
 
     user_text = (
-        f"Rate all {N} products (0..{N-1}) in the grid. Ties allowed. "
-        "If unreadable/blocked → conservative (≤4). "
-        "Return **only** a call to `rank_products(ratings=[...])` with exactly N integers. "
+        "Return only rank_products(ratings=[...]) with exactly N integers.\n"
         "Background:" + bg_json
     )
 

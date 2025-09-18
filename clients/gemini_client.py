@@ -9,6 +9,7 @@ import _config as config
 from clients.supabase_client import get_supabase_client
 from interfaces.outfits_interface import OutfitsInterface
 from utils.image_processing.image_gen import prepare_pil_for_upload, detect_image_mime_and_ext, compose_user_images_row, split_row_image_into_cells
+from ai.prompts.image_generation import create_flatlay_prompt, create_virtual_tryon_prompt
 import time
 
 from PIL import Image
@@ -86,26 +87,15 @@ class GeminiClient:
 		user_img = prepare_pil_for_upload(Image.open("_assets/user_full_body_female.png"))
 		grid_img = prepare_pil_for_upload(Image.open(BytesIO(grid_bytes)))
 		
-		prompt = "Use the first image (user model) as base. Use the second image (clothing grid) to dress them. Same size, no text."
+		prompt = create_virtual_tryon_prompt()
 		return self._generate_image([prompt, user_img, grid_img])
 
 
 	async def generate_flatlay_and_upload(self, outfits: List[Dict[str, Any]], *, user_gender: Optional[str] = None, thread_id: Optional[str] = None) -> List[Optional[str]]:
 		"""Generate and upload flatlay images for multiple outfits."""
 		def _generate():
-			# Combine all outfits into a single prompt
-			combined_prompt = """
-			Dress the avatars in the following outfits from left to right.
-			And provide individual background that fits the vibe of each outfit and is not distracting.
-			The background should a scene that the user fits into naturally, not something that is contrived or abstract.
-			Do not make the background or the lighting of the image too dark or too light.
-			Keep each avatars body proportions EXACTLY as they are now, do not increase the height.
-			You may slightly change the body positioning to give a bit of movement, like in a model photoshoot.
-			The user should be looking directly at the camera. KEEP A HIGH FIDELITY OF THE USER'S FACE.
-			Keep a bold red line between each cell.
-			"""
-			for i, outfit in enumerate(outfits):
-				combined_prompt += f"Outfit {i+1}:\n{json.dumps(outfit, ensure_ascii=False)}\n\n"
+			# Generate the prompt using the extracted function
+			combined_prompt = create_flatlay_prompt(outfits)
 			
 			try:
 				gender = (user_gender or "").strip().lower()
@@ -143,16 +133,35 @@ class GeminiClient:
 				bucket = getattr(config.model_config, 'FLATLAY_RENDERING', {}).get("bucket", "outfit-flatlay-images")
 				
 				supabase = get_supabase_client()
-				supabase.storage.from_(bucket).upload(filename, img_bytes, {"content-type": mime_type})
-				url = supabase.storage.from_(bucket).get_public_url(filename)
-				urls.append(url)
+				
+				# Simple retry logic for SSL issues
+				max_retries = 3
+				for attempt in range(max_retries):
+					try:
+						supabase.storage.from_(bucket).upload(filename, img_bytes, {"content-type": mime_type})
+						url = supabase.storage.from_(bucket).get_public_url(filename)
+						urls.append(url)
+						break
+					except Exception as e:
+						if attempt == max_retries - 1:
+							logger.error(f"Failed to upload after {max_retries} attempts: {e}")
+							urls.append(None)
+						else:
+							logger.warning(f"Upload attempt {attempt + 1} failed, retrying: {e}")
+							await asyncio.sleep(1)
 			else:
 				urls.append(None)
 		
 		return urls
 
 
-	def launch_flatlay_task(self, outfits: List[Dict[str, Any]], *, thread_id: Optional[str] = None, outfit_ids: Optional[List[str]] = None, user_gender: Optional[str] = None) -> asyncio.Task:
+	def launch_flatlay_task(
+			self, 
+			*, 
+			outfits: List[Dict[str, Any]], 
+			thread_id: Optional[str] = None, 
+			outfit_ids: Optional[List[str]] = None, 
+			user_gender: Optional[str] = None) -> asyncio.Task:
 		"""Spawn flatlay generation task for multiple outfits."""
 		outfits_interface = OutfitsInterface()
 

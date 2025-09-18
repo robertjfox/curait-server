@@ -19,7 +19,6 @@ import _config as config
 
 def generate_outfit_schema(queue_multiplier: int):
     num_outfits = config.NUM_OUTFITS_IN_GRID * queue_multiplier
-    num_items = config.NUM_ITEMS_PER_OUTFIT
     clothing_items = config.CLOTHING_ITEMS
 
     # Build outfits array with name/description and items array
@@ -46,8 +45,8 @@ def generate_outfit_schema(queue_multiplier: int):
             "description": {"type": "string"},
             "items": {
                 "type": "array",
-                "minItems": num_items,
-                "maxItems": num_items,
+                "minItems": 3,
+                "maxItems": 5,
                 "items": item_object_schema
             }
         },

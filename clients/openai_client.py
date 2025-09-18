@@ -10,7 +10,7 @@ import time
 
 # Prompts
 from ai.prompts.generate_outfits import generate_outfit_prompts
-from ai.prompts.product_ranking_binary import build_product_ranking_prompt
+from ai.prompts.product_ranking import build_product_ranking_prompt
 from ai.prompts.prompt_suggestions import build_prompt_suggestions_messages
 
 # Schemas
@@ -56,7 +56,8 @@ class OpenAIClient:
         user_data: Dict[str, Any],
         conversation_history: List[Dict[str, Any]] = [],
         outfit_history: List[Dict[str, Any]] = [],
-        on_outfits: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
+        on_outfit_batch: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
+        on_single_outfit: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> None:
         
         schema = generate_outfit_schema(queue_multiplier)
@@ -74,13 +75,13 @@ class OpenAIClient:
 
         res = await process_streaming_outfit_response(
             stream,
-            on_outfits=on_outfits,
+            on_outfit_batch=on_outfit_batch,
+            on_single_outfit=on_single_outfit,
             start_time=start_time,
             grid_size=config.NUM_OUTFITS_IN_GRID,
         )
 
         return res
-
 
     async def rank_products_flow(
         self,
@@ -89,14 +90,15 @@ class OpenAIClient:
         item_context: Dict[str, Any],
         num_results: int,
         grid_image_data_uri: str,
-        thread_id: Optional[str] = None,
+        outfit_row: Dict[str, Any],
     ) -> List[int]:
         """LLM-only ranking: builds messages + tool schema, calls model, returns ratings list."""
         messages = build_product_ranking_prompt(
-            user_data,
-            item_context,
-            num_results,
+            user_data=user_data,
+            item_context=item_context,
+            num_results=num_results,
             grid_image_data_uri=grid_image_data_uri,
+            outfit_row=outfit_row,
         )
 
         tools = [{

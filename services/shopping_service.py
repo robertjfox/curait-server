@@ -31,19 +31,17 @@ class ShoppingService:
         self, 
         keywords: str, 
         user_data: Dict[str, Any], 
-        thread_id: Optional[str] = None,    
     ) -> Tuple[List[Dict[str, Any]], int]:
         """Search for products based on keywords."""
         try:
-            results, unfiltered_results_length = await self._client.search_item(
+            results, unfiltered_results_length, filtered_results_length = await self._client.search_item(
                 keywords=keywords,
                 user_gender=user_data.get("gender"),
-                thread_id=thread_id,
                 min_price=config.SHOPPING_MIN_PRICE,    
                 max_price=config.SHOPPING_MAX_PRICE
             )
 
-            return results or [], unfiltered_results_length
+            return results or [], unfiltered_results_length, filtered_results_length
         except Exception as e:
             logger.error(f"Shopping search failed for keywords '{keywords}': {e}")
             return []

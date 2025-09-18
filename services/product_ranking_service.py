@@ -20,7 +20,7 @@ class ProductRankingService:
         user_data: Dict[str, Any],
         item_context: Dict[str, Any],
         results: List[Dict[str, Any]],
-        thread_id: str | None = None,
+        outfit_row: Dict[str, Any],
     ) -> Tuple[List[Dict[str, Any]], List[int]]:
         """
         Rank products using image-only AI analysis by creating a product grid, asking the
@@ -67,7 +67,7 @@ class ProductRankingService:
                         item_context=item_context,
                         num_results=n,
                         grid_image_data_uri=grid_data_uri,
-                        thread_id=thread_id,
+                        outfit_row=outfit_row,
                     )
                 except Exception as ranking_err:
                     logger.warning(f"Failed to rank products: {ranking_err}")

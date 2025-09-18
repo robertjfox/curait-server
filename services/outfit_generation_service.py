@@ -39,96 +39,94 @@ class OutfitGenerationService:
 		
 	async def _process_single_item(
 		self,
+		*,				
 		item_id: str,
 		keywords: str,
 		user_data: Dict[str, Any],
-		thread_id: Optional[str] = None,
+		outfit_row: Dict[str, Any],
 	) -> None:
 		"""Handle shopping->ranking->storage for a single item."""
 		try:
 
 			start_time = time.time()
-
-			# Step 1: SHOPPING ------------------------------------------------------------
+			results = []
 
 			try:
-				raw_results, unfiltered_results_length = await self.shopping_service.search_for_keywords(
+				unranked_results, unranked_results_length, filtered_results_length = await self.shopping_service.search_for_keywords(
 					keywords=keywords,
 					user_data=user_data,
-					thread_id=thread_id
 				)
+				results = unranked_results
 			except Exception as e:
 				logger.error(f"Failed to search for keywords '{keywords}': {e}")
 				return
 			
-			if not raw_results:
+			if not unranked_results:
 				return
 			
 			shop_time = time.time() - start_time
 
-			# Update with raw results first
-			self.outfit_items_interface.update_search_results(item_id, raw_results)
-			
-			# Step 2: RANKING ------------------------------------------------------------		
+			self.outfit_items_interface.update_search_results(item_id, results)
+
 			
 			if config.PRODUCT_RANKING_ENABLED:
 				ranked_results, ratings = await self.ranking_service.rank_results(
 					user_data=user_data,
 					item_context={"keywords": keywords},
-					results=raw_results,
-					thread_id=thread_id,
+					results=unranked_results,
+					outfit_row=outfit_row,
 				)
-			else:
-				ranked_results = raw_results
+
+				results = ranked_results
 
 			rank_time = time.time() - start_time - shop_time
-			# Step 4: STORAGE
-			self.outfit_items_interface.update_search_results(item_id, ranked_results)
+			self.outfit_items_interface.update_search_results(item_id, results)
 
-			logger.info(
-				f"🔍 {keywords}\n"
-				f"  🛒 {shop_time:.1f}s | {unfiltered_results_length} results\n"
-				f"  🏆 {rank_time:.1f}s | {ratings}"	
-			)
+			# logger.info(
+			# 	f"🔍 {keywords}\n"
+			# 	f"  🛒 {shop_time:.1f}s | {unranked_results_length} -> {filtered_results_length} res\n"
+			# 	f"  🏆 {rank_time:.1f}s | {ratings}"	
+			# )
 			
 		except Exception as e:
 			logger.error(f"Failed to process item with keywords '{keywords}': {e}")
 
- 
-	async def process_multiple_outfits(
-			self, *, 
-			outfits: List[Dict[str, Any]], 
-			thread_id: Optional[str] = None, 
-			user_gender: Optional[str] = None,
-			assistant_msg_id: Optional[str] = None,
-		) -> None:
-		"""Update outfit metadata, update outfit_items with types/keywords, and launch flatlay generation for all outfits."""
-		try:
+	async def process_single_outfit(
+		self,
+		*,
+		outfit: Dict[str, Any],
+		assistant_msg_id: Optional[str] = None,
+		thread_id: Optional[str] = None,
+		outfit_count: int = 0,
+		use_quque_multiplier: bool = True,
+	) -> None:
+		"""Process a single outfit."""
 
-			# create outfit and items in the database
-			outfit_ids = []
+		assistant_msg_id = assistant_msg_id if use_quque_multiplier else None
+		assistant_msg_id = None if outfit_count > 3 else assistant_msg_id
 
-			for outfit in outfits:
-				outfit_id = self.outfits_interface.create(
-					thread_id=thread_id,
+		try:		
+			outfit_id = self.outfits_interface.create(
 					message_id=assistant_msg_id,
 					name=outfit.get("name"),
 					description=outfit.get("description"),
+					thread_id=thread_id,
 				)
 
-				outfit_ids.append(outfit_id)
-				for item in outfit.get("items"):
-					self.outfit_items_interface.create(
-						outfit_id=outfit_id,
-						type=item.get("type"),
-						keywords=item.get("keywords"),
-					)
+			for item in outfit.get("items"):
+				self.outfit_items_interface.create(
+					outfit_id=outfit_id,
+					type=item.get("type"),
+					keywords=item.get("keywords"),
+				)
 
-			# Launch flatlay generation for ALL outfits after metadata is set
-			self.gemini_client.launch_flatlay_task(outfits, thread_id=thread_id, outfit_ids=outfit_ids, user_gender=user_gender)
+			# launch search and rank for the outfit (non-blocking)
+			asyncio.create_task(self.search_and_rank_for_outfit(outfit_id=outfit_id))
+
+			return outfit_id
 
 		except Exception as e:
-			logger.warning(f"Failed to process multiple outfits: {e}")
+			logger.error(f"Failed to process outfit: {e}")
 
  
 	async def search_and_rank_for_outfit(self, *, outfit_id: str) -> Dict[str, Any]:
@@ -164,7 +162,12 @@ class OutfitGenerationService:
 			keywords = (item.get("keywords") or "").strip()
 			if not item_id or not keywords:
 				continue
-			tasks.append(asyncio.create_task(self._process_single_item(item_id, keywords, user_data, thread_id)))
+			tasks.append(asyncio.create_task(self._process_single_item(
+				item_id=item_id,
+				keywords=keywords,
+				user_data=user_data,
+				outfit_row=outfit_row,
+			)))
 
 		if not tasks:
 			return {"success": True, "items_processed": 0}

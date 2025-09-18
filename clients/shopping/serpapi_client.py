@@ -36,11 +36,9 @@ class SerpApiShoppingClient:
             self, 
             keywords: str, 
             user_gender: str, 
-            thread_id: str | None = None, 
             min_price: int | None = _config.SHOPPING_MIN_PRICE, 
             max_price: int | None = _config.SHOPPING_MAX_PRICE,
-            skip_rating_filter: bool = False,
-            ) -> Tuple[List[Dict[str, Any]], int]:
+            ) -> Tuple[List[Dict[str, Any]], int, int]:
 
         """Search for a single item using keywords, returns normalized shopping results"""
         async with self._sem:
@@ -48,9 +46,6 @@ class SerpApiShoppingClient:
 
             # Build query and payload
             query = build_query(keywords)
-
-            # testing - add new at the end of the query
-            # query += " new"
 
             num_to_fetch = _config.SHOPPING_RESULTS_TO_FETCH
 
@@ -86,9 +81,15 @@ class SerpApiShoppingClient:
                     items = filter_blocked_sources(items, _config.BLOCKED_SOURCES)
                     items = filter_by_gender(items, user_gender)
                     
-                    # Apply rating filter only if not skipped
-                    # if not skip_rating_filter:
-                    #     items = filter_by_rating(items)
+
+
+
+                    items_before_rating_filter = items
+                    items = filter_by_rating(items)
+                    if len(items) < 8:
+                        items = items_before_rating_filter
+
+                    filtered_results_length = len(items)
                     
                     # Then cap to what we intend to rank
                     items = cap_results(items, _config.SHOPPING_RESULTS_TO_RANK)
@@ -101,24 +102,11 @@ class SerpApiShoppingClient:
                             return await self.search_item(
                                 keywords=keywords, 
                                 user_gender=user_gender, 
-                                thread_id=thread_id,
                                 min_price=None, 
                                 max_price=None,
-                                skip_rating_filter=skip_rating_filter
                             )
                         
-                        elif not skip_rating_filter:
-                            logger.warning("Not enough search results, trying again without rating filtering")
-                            return await self.search_item(
-                                keywords=keywords, 
-                                user_gender=user_gender, 
-                                thread_id=thread_id,
-                                min_price=None, 
-                                max_price=None,
-                                skip_rating_filter=True
-                            )
-
-                    return items, unfiltered_results_length
+                    return items, unfiltered_results_length, filtered_results_length
 
                 except Exception as e:
                     if attempt < max_attempts:

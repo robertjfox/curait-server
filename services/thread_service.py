@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Callable
 import logging
 from collections import deque
 import asyncio
@@ -12,6 +12,7 @@ from interfaces.outfit_items_interface import OutfitItemsInterface
 from services.outfit_generation_service import OutfitGenerationService
 import _config as config
 from clients.openai_client import get_openai_client
+from clients.gemini_client import get_gemini_client
 
 logger = logging.getLogger(__name__)
 class ThreadService:
@@ -27,6 +28,7 @@ class ThreadService:
         # Single service that handles the full outfit flow
         self.outfit_generation_service = OutfitGenerationService()
         self.openai_client = get_openai_client()
+        self.gemini_client = get_gemini_client()
 
     async def _generate_title_task(self, thread_id: str, first_user_message: str) -> None:
         """Fire-and-forget: generate a short title and update thread when ready."""
@@ -35,6 +37,30 @@ class ThreadService:
             self.threads_interface.update_title(thread_id, title)
         except Exception as e:
             logger.warning(f"Failed to generate title: {e}")
+
+    async def _process_single_outfit_with_callback(
+        self,
+        *,
+        outfit: Dict[str, Any],
+        register_callback: Callable[[Dict[str, Any], str], None],
+        assistant_msg_id: Optional[str] = None,
+        thread_id: Optional[str] = None,
+        outfit_count: int = 0,
+        use_quque_multiplier: bool = True,
+    ) -> None:
+        """Process a single outfit and register it with the callback when complete."""
+        try:
+            outfit_id = await self.outfit_generation_service.process_single_outfit(
+                outfit=outfit,
+                assistant_msg_id=assistant_msg_id,
+                thread_id=thread_id,
+                outfit_count=outfit_count,
+                use_quque_multiplier=use_quque_multiplier,
+            )
+            # Register the completed outfit with its ID
+            register_callback(outfit, outfit_id)
+        except Exception as e:
+            logger.error(f"Failed to process outfit with callback: {e}")
 
     async def route_user_message(
         self, 
@@ -48,7 +74,6 @@ class ThreadService:
             thread = self.threads_interface.get(thread_id)
             thread_title = thread.get("title", "Thread Title")
 
-            # if the thread has no title, or its "Thread Title" generate one
             if not thread_title or thread_title == "Thread Title":
                 asyncio.create_task(self._generate_title_task(thread_id, user_message))
 
@@ -79,55 +104,40 @@ class ThreadService:
 
             if "more outfits" in user_message.lower():
                 use_quque_multiplier = False
-                self.threads_interface.update_thread_outfits_with_no_message_id(thread_id, assistant_msg_id, 1)
+                self.threads_interface.update_thread_outfits_with_no_message_id(thread_id, assistant_msg_id, 3)
 
             else:
                 self.threads_interface.delete_thread_outfits_with_no_message_id(thread_id)
 
-            await self._generate_styling_response(
-                thread_id=thread_id,
+            queue_multiplier = config.QUEUE_MULTIPLIER if use_quque_multiplier else 1
+
+            await self.openai_client.generate_outfits_flow(
+                queue_multiplier=queue_multiplier,
                 user_data=user_data,
-                conversation_history=conversation_history,
+                conversation_history=conversation_history,  
                 outfit_history=outfit_history,
-                assistant_msg_id=assistant_msg_id,
-                use_quque_multiplier=use_quque_multiplier,
+                on_single_outfit=lambda outfit, register_callback, outfit_count: asyncio.create_task(
+                    self._process_single_outfit_with_callback(
+                        outfit=outfit,
+                        register_callback=register_callback,
+                        assistant_msg_id=assistant_msg_id,
+                        thread_id=thread_id,
+                        outfit_count=outfit_count,
+                        use_quque_multiplier=use_quque_multiplier
+                    )
+                ),
+                on_outfit_batch=lambda outfits, outfit_ids: self.gemini_client.launch_flatlay_task(
+                    outfits=outfits,
+                    outfit_ids=outfit_ids,
+                    user_gender=user_data.get("gender"),
+                    thread_id=thread_id,
+                ),
             )
+
+            return {"success": True}
                 
         except Exception as e:
             logger.error(f"Chat with styling failed: {e}")
             raise
 
 
-    async def _generate_styling_response(
-        self,
-        thread_id: str,
-        user_data: Dict[str, Any],
-        conversation_history: List[Dict[str, Any]],
-        outfit_history: List[Dict[str, Any]],
-        assistant_msg_id: str = None,
-        use_quque_multiplier: bool = False,
-    ) -> Dict[str, Any]:
-        """Generate a styling response with outfits."""
-        try:
-            queue_multiplier = config.QUEUE_MULTIPLIER if use_quque_multiplier else 1
-
-            res = await self.openai_client.generate_outfits_flow(
-                queue_multiplier=queue_multiplier,
-                user_data=user_data,
-                conversation_history=conversation_history,  
-                outfit_history=outfit_history,
-                on_outfits=lambda outfits: asyncio.create_task(
-                    self.outfit_generation_service.process_multiple_outfits(
-                        outfits=outfits,
-                        thread_id=thread_id,
-                        user_gender=user_data.get("gender"),
-                        assistant_msg_id=assistant_msg_id,
-                    )
-                ),
-            )
-                        
-            return {"success": True}
-
-        except Exception as e:
-            logger.error(f"Failed to generate styling response: {e}")
-            raise

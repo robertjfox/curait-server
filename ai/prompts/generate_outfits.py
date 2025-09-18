@@ -14,7 +14,6 @@ def _gender_gate(user_gender: str) -> Tuple[str, str]:
     label = user_gender or "unspecified"
     return kw, label
 
-
 def _load_trend_research(user_gender: str = None) -> str:
     """Load adjacent trend research markdown based on user gender."""
     current_dir = os.path.dirname(__file__)
@@ -38,7 +37,6 @@ def _load_trend_research(user_gender: str = None) -> str:
             logger.exception(f"Failed to read {filename}")
     return ""
 
-
 def generate_outfit_system_prompt(user_gender: str = None) -> str:
     gender_kw, gender_label = _gender_gate(user_gender)
 
@@ -59,7 +57,8 @@ def generate_outfit_system_prompt(user_gender: str = None) -> str:
         "- Trend data is meant to be guiding, but always make the situational context THE MOST IMPORTANT FACTOR IN TERMS OF DIRECTION.\n\n"
 
         "COMPOSITION RULES:\n"
-        f"- Exactly 4 items per outfit.\n"
+        f"- 3-4 items per outfit.\n"
+        f"- Base the number of items on your descression. Use accessories only when they really make sense.\n"
         f"- Each item.type ∈ [{', '.join(config.CLOTHING_ITEMS)}]; no duplicate roles per outfit.\n"
         "- Practical combos only (e.g., no blazer+shorts; no dress+skirt together; no shorts with winter coat).\n"
         "- Cohesive palette and sensible layering for the weather.\n\n"
@@ -82,11 +81,9 @@ def generate_outfit_system_prompt(user_gender: str = None) -> str:
         "- DONT be vague. A jacket needs more description than just 'jacket'. A sweatshirt should be hooded, crewneck, zip etc. A shirt should be button up, t shirt, polo, etc. These are just examples. Use your BEST judgement without being TOO SPECIFIC. \n\n"
     )
 
-
 def generate_outfit_user_prompt(
     user_data: Dict[str, Any],
     conversation_history: List[Dict[str, Any]],
-    most_recent_message: Dict[str, Any],
     formatted_outfit_history: str,
     num_outfits: int,
 ) -> str:
@@ -101,9 +98,10 @@ def generate_outfit_user_prompt(
         "- Use destination from conversation for weather; profile location is just background vibe.\n"
         "- Treat profile/context as baseline for fit, proportions, coverage, comfort, colors, constraints.\n"
         "- Avoid repeating items from this thread; keep options fresh but practical.\n"
-        "- Follow the MOST RECENT MESSAGE closely. This is the primary instruction.\n\n"
+        "- Follow the ORIGINAL MESSAGE and MOST RECENT MESSAGE closely. This is the primary instruction.\n\n"
         "- But make sure you take into accouunt the instructions from the CONVERSATION_HISTORY, unless the user has changed their mind.\n\n"
-        "- If OUTFIT_HISTORY has feedback, use it to improve the future outfits.\n\n"
+        "- If OUTFIT_HISTORY has feedback, use it to improve and refine the direction of the outfits.\n\n"
+        "- Try to generate FRESH outfits and ideas, not just variations of the same outfits.\n\n"
 
         "USER_PROFILE:\n" + j(profile) + "\n\n"
 
@@ -111,12 +109,9 @@ def generate_outfit_user_prompt(
 
         "CONVERSATION_HISTORY:\n" + j(conversation_history) + "\n\n"
 
-        "MOST_RECENT_MESSAGE:\n" + j(most_recent_message) + "\n\n"
-
         "OUTFIT_HISTORY:\n" + formatted_outfit_history + "\n\n"
         "Return via the provided function schema ONLY."
     )
-
 
 def format_convo_history(conversation_history: List[Dict[str, Any]]) -> str:
     """Format conversation history into a readable string, filtering out empty messages."""
@@ -125,24 +120,37 @@ def format_convo_history(conversation_history: List[Dict[str, Any]]) -> str:
     if not conversation_history:
         return ""
     
-    # Exclude the most recent message
-    messages_to_process = conversation_history[:-1] if len(conversation_history) > 0 else []
+    # Process all messages except the most recent one
+    messages_to_process = conversation_history[:-1] if len(conversation_history) > 1 else []
     
+    counter = 1
     for msg in messages_to_process:
         role = msg.get("role", "")
         content = str(msg.get("content", "")).strip()
         
-        # Skip messages with blank content
-        if not content or content == "more outfits":
+        # Skip messages with blank content or "more outfits"
+        if not content or content.lower() == "more outfits":
             continue
             
         if role == "user":
-            lines.append(f"user: {content}")
-        elif role == "assistant":
-            lines.append(f"agent: {content}")
+            if counter == 1:
+                lines.append("ORIGINAL MESSAGE")
+            lines.append(f"{counter}. {content}")
+            counter += 1
+    
+    # Add most recent message separately
+    if conversation_history:
+        most_recent = conversation_history[-1]
+        most_recent_role = most_recent.get("role", "")
+        most_recent_content = str(most_recent.get("content", "")).strip()
+        
+        if most_recent_role == "user" and most_recent_content and most_recent_content.lower() != "more outfits":
+            if lines:
+                lines.append("")
+            lines.append("MOST RECENT MESSAGE:")
+            lines.append(most_recent_content)
     
     return "\n".join(lines)
-
 
 def generate_outfit_prompts(
     user_data: Dict[str, Any],
@@ -152,14 +160,8 @@ def generate_outfit_prompts(
 ) -> Tuple[str, str]:
     
     convo_history = format_convo_history(conversation_history)
-    
-    # filter out all the messages that are just "more outfits"
-    conversation_history = [msg for msg in conversation_history if msg.get("content") != "more outfits"]
 
-    # or if content is blank
-    conversation_history = [msg for msg in conversation_history if msg.get("content") != ""]
-
-    most_recent_message = conversation_history[-1] if conversation_history else None
+    logger.info(convo_history)
 
     user_gender = (user_data or {}).get("gender")
     num_outfits = config.NUM_OUTFITS_IN_GRID * queue_multiplier
@@ -172,7 +174,6 @@ def generate_outfit_prompts(
     user_prompt = generate_outfit_user_prompt(
         user_data, 
         convo_history,
-        most_recent_message,
         formatted_outfit_history, 
         num_outfits,
     )

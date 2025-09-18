@@ -11,6 +11,7 @@ from utils.search_client_utils import (
     filter_blocked_sources,
     filter_by_gender,
     filter_price_min_max,
+    filter_by_rating,
 )
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,6 @@ class SerperShoppingClient:
             self, 
             keywords: str, 
             user_gender: str, 
-            thread_id: str | None = None,
             min_price: int | None = _config.SHOPPING_MIN_PRICE, 
             max_price: int | None = _config.SHOPPING_MAX_PRICE,
             ) -> Tuple[List[Dict[str, Any]], int]:
@@ -81,11 +81,17 @@ class SerperShoppingClient:
                 items = filter_by_gender(items, user_gender)
                 items = filter_price_min_max(items, min_price, max_price)
 
+                items_before_rating_filter = items
+                items = filter_by_rating(items)
+                if len(items) < 8:
+                    items = items_before_rating_filter
+
                 # Then cap to what we intend to rank
+                filtered_results_length = len(items)
                 cap = max(_config.SHOPPING_RESULTS_TO_RANK, 1)
                 items = cap_results(items, cap)
 
-                return items, unfiltered_results_length
+                return items, unfiltered_results_length, filtered_results_length
                 
             except Exception as e:
                 logger.error("❌ Serper search failed for '%s'", keywords)
