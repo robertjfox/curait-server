@@ -12,13 +12,10 @@ def format_outfit_history(outfit_history: List[Dict[str, Any]]) -> str:
 
     for outfit in outfit_history[-10:]:
         title = str(outfit.get("title", "")).strip()
-        description = str(outfit.get("description", "")).strip()
         items = outfit.get("items") or []
 
         if title:
             lines.append(f"{title}")
-        # if description:
-        #     lines.append(f"- {description}")
 
         for item in items:
             raw_keywords = item.get("keywords", [])
@@ -39,7 +36,7 @@ def format_outfit_history(outfit_history: List[Dict[str, Any]]) -> str:
             for keyword in keywords:
                 lines.append(f"- {keyword}{item_suffix}")
 
-        if title or description or items:
+        if title or items:
             lines.append("")
 
     while lines and lines[-1] == "":

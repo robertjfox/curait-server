@@ -20,7 +20,6 @@ def build_product_ranking_prompt(
         "gender": (user_data.get("gender") or "unspecified").lower(),
         "num_results": N,
         "outfit_name": outfit_row.get("name") or "",
-        "outfit_description": outfit_row.get("description") or "",
     }
     
     bg_json = json.dumps(bg, separators=(",", ":"))

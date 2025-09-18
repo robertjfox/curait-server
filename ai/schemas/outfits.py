@@ -5,7 +5,6 @@ import _config as config
 #   "outfits": [
 #     {
 #       "name": "outfit name",
-    #   "description": "outfit description", 
 #       "items": [
 #         {"type": "shirt", "keywords": "red leather jacket"},
 #         {"type": "pants", "keywords": "blue suede shoes"},
@@ -17,11 +16,12 @@ import _config as config
 # }
 
 
+
 def generate_outfit_schema(queue_multiplier: int):
     num_outfits = config.NUM_OUTFITS_IN_GRID * queue_multiplier
     clothing_items = config.CLOTHING_ITEMS
 
-    # Build outfits array with name/description and items array
+    # Build outfits array with name and items array (no description)
     item_object_schema = {
         "type": "object",
         "properties": {
@@ -42,7 +42,6 @@ def generate_outfit_schema(queue_multiplier: int):
         "type": "object",
         "properties": {
             "name": {"type": "string"},
-            "description": {"type": "string"},
             "items": {
                 "type": "array",
                 "minItems": 3,
@@ -50,7 +49,7 @@ def generate_outfit_schema(queue_multiplier: int):
                 "items": item_object_schema
             }
         },
-        "required": ["name", "description", "items"],
+        "required": ["name", "items"],
         "additionalProperties": False,
     }
 

@@ -20,14 +20,12 @@ class OutfitsInterface:
         thread_id: str,
         message_id: str,
         name: str,
-        description: Optional[str] = None,
     ) -> Optional[str]:
         """Create a new outfit and return its ID."""
         payload: Dict[str, Any] = {
             "thread_id": thread_id,
             "message_id": message_id,
             "name": name,
-            "description": description,
         }
         try:
             res = self._supabase.table(self._table).insert(payload).execute()
@@ -49,13 +47,13 @@ class OutfitsInterface:
             return False
 
     def get_thread_outfit_history(self, thread_id: str) -> List[Dict[str, Any]]:
-        """Get all outfit history for a thread with title, description, keywords, and feedback."""
+        """Get all outfit history for a thread with title, keywords, and feedback."""
         try:
             # Get outfits directly by thread_id with their items
             res = (
                 self._supabase
                 .table(self._table)
-                .select("name, description, feedback, outfit_items(keywords, feedback)")
+                .select("name, feedback, outfit_items(keywords, feedback)")
                 .eq("thread_id", thread_id)
                 .execute()
             )
@@ -76,7 +74,6 @@ class OutfitsInterface:
                 
                 outfits.append({
                     "title": outfit.get("name"),
-                    "description": outfit.get("description"),
                     "items": items_with_feedback,  # Each item has its keywords and feedback paired
                     "feedback": outfit.get("feedback")  # Overall outfit feedback
                 })

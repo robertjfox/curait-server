@@ -109,7 +109,6 @@ class OutfitGenerationService:
 			outfit_id = self.outfits_interface.create(
 					message_id=assistant_msg_id,
 					name=outfit.get("name"),
-					description=outfit.get("description"),
 					thread_id=thread_id,
 				)
 

@@ -29,7 +29,6 @@ class OutfitItem(BaseModel):
 
 class Outfit(BaseModel):
     name: str
-    description: str
     items: Dict[str, OutfitItem]
 
 
