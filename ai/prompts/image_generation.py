@@ -3,7 +3,7 @@ from typing import List, Dict, Any
 
 
 # Toggle for background rendering in flatlay images
-USE_CONTEXTUAL_BACKGROUNDS = True
+USE_CONTEXTUAL_BACKGROUNDS = False
 
 
 def create_flatlay_prompt(outfits: List[Dict[str, Any]]) -> str:
