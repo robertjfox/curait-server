@@ -81,9 +81,6 @@ class SerpApiShoppingClient:
                     items = filter_blocked_sources(items, _config.BLOCKED_SOURCES)
                     items = filter_by_gender(items, user_gender)
                     
-
-
-
                     items_before_rating_filter = items
                     items = filter_by_rating(items)
                     if len(items) < 8:
@@ -96,6 +93,8 @@ class SerpApiShoppingClient:
 
                     # Retry with relaxed filters if we don't have enough results
                     if len(items) < 1:
+
+                        logger.warning("Not enough search results, returning empty list")
 
                         if params.get("min_price") is not None or params.get("max_price") is not None:
                             logger.warning("Not enough search results, trying again without price filtering")

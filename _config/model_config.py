@@ -24,8 +24,8 @@ GPT_IMAGE_1 = "gpt-image-1"
 # For generating outfit recommendations with structured JSON output
 # Category: "outfit_generation"
 OUTFIT_GENERATION = {
-    # "model": GPT_4O_MINI,
-    "model": GPT_4_1,
+    "model": GPT_4O_MINI,
+    # "model": GPT_4_1,
     # "model": GPT_4O_SEARCH,
     # "model": GPT_O4_MINI,
     # "model": GPT_5,

@@ -49,14 +49,16 @@ class OutfitGenerationService:
 		try:
 
 			start_time = time.time()
-			results = []
+			
+			results_arr = []
+			ratings_arr = []
 
 			try:
 				unranked_results, unranked_results_length, filtered_results_length = await self.shopping_service.search_for_keywords(
 					keywords=keywords,
 					user_data=user_data,
 				)
-				results = unranked_results
+				results_arr = unranked_results
 			except Exception as e:
 				logger.error(f"Failed to search for keywords '{keywords}': {e}")
 				return
@@ -66,8 +68,7 @@ class OutfitGenerationService:
 			
 			shop_time = time.time() - start_time
 
-			self.outfit_items_interface.update_search_results(item_id, results)
-
+			self.outfit_items_interface.update_search_results(item_id, results_arr)
 			
 			if config.PRODUCT_RANKING_ENABLED:
 				ranked_results, ratings = await self.ranking_service.rank_results(
@@ -77,15 +78,16 @@ class OutfitGenerationService:
 					outfit_row=outfit_row,
 				)
 
-				results = ranked_results
+				results_arr = ranked_results
+				ratings_arr = ratings
 
 			rank_time = time.time() - start_time - shop_time
-			self.outfit_items_interface.update_search_results(item_id, results)
+			self.outfit_items_interface.update_search_results(item_id, results_arr)
 
 			logger.info(
 				f"🔍 {keywords}\n"
 				f"  🛒 {shop_time:.1f}s | {unranked_results_length} -> {filtered_results_length} res\n"
-				f"  🏆 {rank_time:.1f}s | {ratings}"	
+				f"  🏆 {rank_time:.1f}s | {ratings_arr}"	
 			)
 			
 		except Exception as e:
