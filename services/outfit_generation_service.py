@@ -48,6 +48,7 @@ class OutfitGenerationService:
 		"""Handle shopping->ranking->storage for a single item."""
 		try:
 
+			logger.info(f"Processing item '{keywords}'")
 			start_time = time.time()
 			
 			results_arr = []
@@ -67,6 +68,7 @@ class OutfitGenerationService:
 				return
 			
 			shop_time = time.time() - start_time
+			logger.info(f"Shopping time: {shop_time:.1f} for {keywords}")
 
 			self.outfit_items_interface.update_search_results(item_id, results_arr)
 			
@@ -128,20 +130,17 @@ class OutfitGenerationService:
 
 		except Exception as e:
 			logger.error(f"Failed to process outfit: {e}")
-
  
 	async def search_and_rank_for_outfit(self, *, outfit_id: str) -> Dict[str, Any]:
-		"""Trigger product search and ranking for all items in a given outfit in parallel.
-
-		Returns a summary dict with counts.
-		"""
 		# Fetch outfit to derive thread_id and then user context
 		outfit_row = self.outfits_interface.get(outfit_id)
+
 		if not outfit_row:
 			return {"success": False, "message": "Outfit not found"}
 
 		thread_id: Optional[str] = outfit_row.get("thread_id")
 		user_data: Dict[str, Any] = {}
+
 		try:
 			if thread_id:
 				thread = self.threads_interface.get(thread_id)

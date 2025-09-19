@@ -1,6 +1,7 @@
 import logging
 import asyncio
 from typing import Any, Dict, List, Tuple
+import time
 
 from clients.openai_client import get_openai_client
 import _config
@@ -22,20 +23,18 @@ class ProductRankingService:
         results: List[Dict[str, Any]],
         outfit_row: Dict[str, Any],
     ) -> Tuple[List[Dict[str, Any]], List[int]]:
-        """
-        Rank products using image-only AI analysis by creating a product grid, asking the
-        model for per-item ratings (1–10), and returning the top-K items where
-        K = SHOPPING_RESULTS_TO_RETURN. On any failure, return the first K results
-        unchanged. Also applies background removal to the top ranked product.
-        """
         
         async with self._ranking_semaphore:
             try:
+
+                start_time = time.time()
+
                 top_k = max(1, int(getattr(_config, "SHOPPING_RESULTS_TO_RETURN", 10)))
                 cap = max(1, int(getattr(_config, "SHOPPING_RESULTS_TO_RANK", 20)))
                 head = (results or [])[:cap]
 
                 products_with_images = [r for r in head if r.get("imageUrl")]
+
                 if not products_with_images:
                     logger.warning(f"No products with images found for grid creation. Total results: {len(head)}, Results with images: 0")
                     # Fallback: return first K results unchanged with default ratings
@@ -54,6 +53,12 @@ class ProductRankingService:
                         ranking_keywords=ranking_keywords
                     )
                     grid_data_uri = f"data:image/jpeg;base64,{base64.b64encode(img_bytes).decode('ascii')}"
+
+
+                    grid_time = time.time() - start_time
+                    logger.info(f"Grid creation time: {grid_time:.1f} for {ranking_keywords}")
+
+                    start_time = time.time()
                 except Exception as grid_err:
                     logger.error(f"🖼️ GRID CREATION FAILED: {grid_err}")
                     # Fallback: return products with images unchanged with default ratings
@@ -69,6 +74,9 @@ class ProductRankingService:
                         grid_image_data_uri=grid_data_uri,
                         outfit_row=outfit_row,
                     )
+
+                    ranking_time = time.time() - start_time
+                    logger.info(f"Ranking time: {ranking_time:.1f} for {ranking_keywords}")
                 except Exception as ranking_err:
                     logger.warning(f"Failed to rank products: {ranking_err}")
                     # Fallback: return products with images unchanged with default ratings
