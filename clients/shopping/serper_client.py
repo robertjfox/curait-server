@@ -46,6 +46,10 @@ class SerperShoppingClient:
             
             query = build_query(keywords)
 
+            if min_price and max_price:
+                query += f" ${min_price} - ${max_price}"
+
+
             # Request the configured number from Serper
             num_to_request = max(1, _config.SHOPPING_RESULTS_TO_FETCH)
 
@@ -77,14 +81,18 @@ class SerperShoppingClient:
                 unfiltered_results_length = len(items)
                 
                 # Apply source filtering to ALL results
-                items = filter_blocked_sources(items, _config.BLOCKED_SOURCES)
-                items = filter_by_gender(items, user_gender)
-                items = filter_price_min_max(items, min_price, max_price)
-
-                items_before_rating_filter = items
-                items = filter_by_rating(items)
-                if len(items) < 8:
-                    items = items_before_rating_filter
+                # Apply filtering but ensure we keep at least 8 results
+                filtered_items = filter_blocked_sources(items, _config.BLOCKED_SOURCES)
+                if len(filtered_items) >= 8:
+                    items = filtered_items
+                
+                filtered_items = filter_by_gender(items, user_gender)
+                if len(filtered_items) >= 8:
+                    items = filtered_items
+                
+                filtered_items = filter_price_min_max(items, min_price, max_price)
+                if len(filtered_items) >= 8:
+                    items = filtered_items
 
                 # Then cap to what we intend to rank
                 filtered_results_length = len(items)

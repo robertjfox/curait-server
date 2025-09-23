@@ -4,7 +4,6 @@ from typing import Dict, Any, Optional, List
 from services.shopping_service import ShoppingService
 from services.product_ranking_service import ProductRankingService
 from interfaces.outfit_items_interface import OutfitItemsInterface
-from utils.image_processing.background_removal import SupabaseBackgroundProcessor
 import _config as config
 from clients.gemini_client import get_gemini_client
 from interfaces.outfits_interface import OutfitsInterface
@@ -48,7 +47,6 @@ class OutfitGenerationService:
 		"""Handle shopping->ranking->storage for a single item."""
 		try:
 
-			logger.info(f"Processing item '{keywords}'")
 			start_time = time.time()
 			
 			results_arr = []
@@ -68,7 +66,6 @@ class OutfitGenerationService:
 				return
 			
 			shop_time = time.time() - start_time
-			logger.info(f"Shopping time: {shop_time:.1f} for {keywords}")
 
 			self.outfit_items_interface.update_search_results(item_id, results_arr)
 			

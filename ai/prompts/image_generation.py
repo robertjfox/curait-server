@@ -1,5 +1,5 @@
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 
 # Toggle for background rendering in flatlay images
@@ -41,3 +41,38 @@ def create_flatlay_prompt(outfits: List[Dict[str, Any]]) -> str:
 def create_virtual_tryon_prompt() -> str:
     """Create a prompt for virtual try-on generation."""
     return "Use the first image (user model) as base. Use the second image (clothing grid) to dress them. Same size, no text." 
+
+
+def create_fullbody_avatar_prompt(
+    *,
+    height_cm: Optional[float] = None,
+    weight_kg: Optional[float] = None,
+    gender: Optional[str] = None,
+) -> str:
+    """Prompt for generating a studio full-body avatar from a selfie.
+
+    The first image input is the user's selfie. Output should be a full-body,
+    front-facing studio shot on a clean white background in the exact pose
+    described, preserving the user's facial identity.
+    """
+    metrics = []
+    if height_cm is not None:
+        metrics.append(f"height ≈ {int(round(height_cm))} cm")
+    if weight_kg is not None:
+        metrics.append(f"weight ≈ {int(round(weight_kg))} kg")
+    metrics_text = (" (" + ", ".join(metrics) + ")") if metrics else ""
+    gender_text = f" Present as a {gender.lower()} model silhouette." if gender else ""
+
+    return (
+        "Use the first image as the person's face/identity reference. "
+        "Generate a FULL-BODY studio photo of the same person standing, front-facing, neutral stance, "
+        "feet hip‑width apart, arms relaxed at sides, slight friendly smile. "
+        "Plain seamless white background, even soft lighting, natural skin tones, no shadows cut off, no text. "
+        "Camera: full-length portrait, subject centered, include head to shoes with small margin. "
+        "Image ratio approximately 3:4 (portrait orientation, slightly taller than wide). "
+        "Wardrobe: plain white crew‑neck t‑shirt, khaki chino shorts to mid‑thigh, clean white low‑top sneakers, no logos. "
+        "Preserve the person's face and hair from the selfie. "
+        f"Match body proportions to typical {metrics_text} as guidance if provided." 
+        f"{gender_text} "
+        "Output a single image only."
+    )

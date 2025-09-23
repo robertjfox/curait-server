@@ -45,6 +45,27 @@ class ThreadsInterface:
         except Exception:
             return False
 
+    def update_research(self, thread_id: str, research: Dict[str, Any]) -> bool:
+        """Set thread.research TEXT to provided string (JSON string if dict)."""
+        try:
+            research_text = ""
+            if isinstance(research, str):
+                research_text = research
+            else:
+                try:
+                    import json as _json
+                    research_text = _json.dumps(research)
+                except Exception:
+                    research_text = str(research)
+
+            self._supabase.table(self._table).update({
+                "research": research_text,
+            }).eq("id", thread_id).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to update thread research: {e}")
+            return False
+
     def update_thread_outfits_with_no_message_id(self, thread_id: str, message_id: str, queue_pull_count: int) -> bool:
         """Get the oldest outfits for a thread id that have no message id and give them the message id, limited by queue_pull_count."""
         try:

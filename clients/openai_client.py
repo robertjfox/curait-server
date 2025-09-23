@@ -10,7 +10,7 @@ import time
 
 # Prompts
 from ai.prompts.generate_outfits import generate_outfit_prompts
-from ai.prompts.product_ranking import build_product_ranking_prompt
+from ai.prompts.product_ranking_binary import build_product_ranking_prompt
 from ai.prompts.prompt_suggestions import build_prompt_suggestions_messages
 
 # Schemas
@@ -28,6 +28,7 @@ from _config.model_config import (
     PRODUCT_RANKING,    
     TITLE_GENERATION,       
     PROMPT_SUGGESTIONS,
+    THREAD_RESEARCH,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,12 +57,13 @@ class OpenAIClient:
         user_data: Dict[str, Any],
         conversation_history: List[Dict[str, Any]] = [],
         outfit_history: List[Dict[str, Any]] = [],
+        thread_research: Any = None,
         on_outfit_batch: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
         on_single_outfit: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> None:
         
         schema = generate_outfit_schema(queue_multiplier)
-        messages = generate_outfit_prompts(user_data, outfit_history, conversation_history, queue_multiplier)
+        messages = generate_outfit_prompts(user_data, outfit_history, conversation_history, queue_multiplier, thread_research)
 
         start_time = time.time()
 
@@ -105,13 +107,13 @@ class OpenAIClient:
             "type": "function",
             "function": {
                 "name": "rank_products",
-                "description": "Return 1..10 ratings for each product index 0..N-1.",
+                "description": "Return 0..1 ratings for each product index 0..N-1.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "ratings": {
                             "type": "array",
-                            "items": {"type": "integer", "minimum": 1, "maximum": 10},
+                            "items": {"type": "integer", "minimum": 0, "maximum": 1},
                             "minItems": num_results, "maxItems": num_results
                         }
                     },
@@ -158,6 +160,62 @@ class OpenAIClient:
         except Exception:
             return "New Thread"
 
+    async def generate_thread_research(
+        self,
+        *,
+        user_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Produce concise, wearable-oriented research for this user/session.
+
+        Returns a JSON-friendly dict. If model doesn't return JSON, falls back to {"text": str}.
+        """
+        profile = {k: v for k, v in (user_data or {}).items() if k != "context"}
+        ctx = (user_data or {}).get("context") or {}
+
+        instructions = (
+            "You are an expert fashion trend analyst and stylist. Create comprehensive style guidance that balances current trends with the user's personal context. "
+            "Focus on what's trending now in 2025 while considering what the user would realistically wear and feel confident in. "
+            "Include both mainstream and emerging trends, but filter them through the user's lifestyle and preferences.\n\n"
+            "Respond ONLY as strict JSON with keys: {\n"
+            "  \"wear_vibes\": [short strings],             // trending style directions and aesthetics to explore\n"
+            "  \"workhorse_items\": [short strings],        // reliable trending pieces they will actually wear\n"
+            "  \"no_gos\": [short strings],                 // trends to avoid due to fit, climate, or lifestyle constraints\n"
+            "  \"colors\": [short strings],                 // trending color palettes and seasonal hues\n"
+            "  \"fit_notes\": [short strings],              // current silhouette trends, proportions, and styling approaches\n"
+            "  \"trends_quicktake\": [short strings]        // key 2025 fashion trends that align with their profile\n"
+            "}"
+        )
+
+        messages = [
+            {"role": "system", "content": instructions},
+            {
+                "role": "user",
+                "content": json.dumps({
+                    "profile": profile,
+                    "context": ctx,
+                }, separators=(",", ":")),
+            },
+        ]
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=THREAD_RESEARCH["model"],
+                messages=messages,
+                top_p=1,
+            )
+            content = (response.choices[0].message.content or "").strip()
+            try:
+                parsed = json.loads(content)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                pass
+            # Fallback to text blob
+            return {"text": content}
+        except Exception as e:
+            logger.warning(f"Thread research generation failed: {e}")
+            return {"text": ""}
+
     async def generate_prompt_suggestions(
         self,
         *,
@@ -186,21 +244,49 @@ class OpenAIClient:
             prompts = (parsed or {}).get("prompts") if isinstance(parsed, dict) else None
             if not prompts or not isinstance(prompts, list):
                 raise ValueError("No prompts returned")
-            # Sanitize and enforce length/formatting
+            # Clean, split concatenations, and format prompts for consistency
             cleaned: List[str] = []
-            for p in prompts[:4]:
-                s = (p or "").strip().replace("\n", " ")
-                s = s.strip('"').strip("'").strip()
-                if len(s) > 75:
-                    # Truncate at word boundary to avoid cutting mid-word
-                    s = s[:75].rstrip()
-                    # Find last space to avoid cutting mid-word
-                    last_space = s.rfind(' ')
-                    if last_space > 60:  # Only truncate at word boundary if we have reasonable length
-                        s = s[:last_space].rstrip()
-                cleaned.append(s)
-            while len(cleaned) < 4:
-                cleaned.append("Show me versatile outfits for this week")
+
+            def normalize_and_split(raw: Any) -> List[str]:
+                text = str(raw or "")
+                # Unify common concatenation delimiters into a single token
+                delimiters = [
+                    "」「",  # Japanese quote separator
+                    "」 「",
+                    "\n",
+                    "\r",
+                    " | ",
+                    " • ",
+                    " · ",
+                ]
+                for d in delimiters:
+                    text = text.replace(d, "||")
+                # Also split isolated Japanese quotes if model wrapped each item
+                text = text.replace("「", "").replace("」", "")
+
+                parts = []
+                for piece in text.split("||"):
+                    s = piece.strip().strip('"').strip("'").strip()
+                    if not s:
+                        continue
+                    # Collapse internal whitespace
+                    s = " ".join(s.split())
+                    # Remove trailing punctuation that violates guidance
+                    s = s.rstrip(".!?,;:").strip()
+                    # Enforce max length softly
+                    if len(s) > 90:
+                        s = s[:90].rstrip()
+                    parts.append(s)
+                return parts
+
+            for p in prompts:
+                for candidate in normalize_and_split(p):
+                    if candidate and candidate not in cleaned:
+                        cleaned.append(candidate)
+
+            # Ensure we return exactly 4
+            if len(cleaned) < 4:
+                cleaned.extend(["Show me versatile outfits for this week"] * (4 - len(cleaned)))
             return cleaned[:4]
         except Exception as e:
             logger.warning(f"Prompt suggestions failed, falling back: {e}")

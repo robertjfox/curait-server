@@ -47,11 +47,15 @@ class SerpApiShoppingClient:
             # Build query and payload
             query = build_query(keywords)
 
+            query += " sponsored"
+
+            logger.info(f"Query: {query}")
+
             num_to_fetch = _config.SHOPPING_RESULTS_TO_FETCH
 
             params = {
                 "api_key": self.api_key,
-                "engine": "google_shopping",
+                "engine": "google_shopping_light",
                 "q": query,
                 "gl": "us",
                 "hl": "en",
@@ -59,7 +63,7 @@ class SerpApiShoppingClient:
                 "num": num_to_fetch,
                 "min_price": min_price,
                 "max_price": max_price,
-                "json_restrictor": "shopping_results[].{title, product_link, price, source, thumbnail, rating, reviews}"
+                # "json_restrictor": "shopping_results[].{title, product_link, price, source, thumbnail, rating, reviews}"
             }
 
             max_attempts = 2
@@ -81,10 +85,10 @@ class SerpApiShoppingClient:
                     items = filter_blocked_sources(items, _config.BLOCKED_SOURCES)
                     items = filter_by_gender(items, user_gender)
                     
-                    items_before_rating_filter = items
-                    items = filter_by_rating(items)
-                    if len(items) < 8:
-                        items = items_before_rating_filter
+                    # items_before_rating_filter = items
+                    # items = filter_by_rating(items)
+                    # if len(items) < 8:
+                    #     items = items_before_rating_filter
 
                     filtered_results_length = len(items)
                     
@@ -93,8 +97,6 @@ class SerpApiShoppingClient:
 
                     # Retry with relaxed filters if we don't have enough results
                     if len(items) < 1:
-
-                        logger.warning("Not enough search results, returning empty list")
 
                         if params.get("min_price") is not None or params.get("max_price") is not None:
                             logger.warning("Not enough search results, trying again without price filtering")

@@ -30,6 +30,18 @@ class ThreadService:
         self.openai_client = get_openai_client()
         self.gemini_client = get_gemini_client()
 
+    async def _generate_thread_research_task(self, thread_id: str) -> None:
+        """Fire-and-forget: compute research and store under thread.research."""
+        try:
+            thread = self.threads_interface.get(thread_id)
+            user_id = (thread or {}).get("user_id") if thread else None
+            user_data = self.users_interface.get_relevant_context(user_id) if user_id else {}
+            research_obj = await self.openai_client.generate_thread_research(user_data=user_data)
+            # store under dedicated column (as text)
+            self.threads_interface.update_research(thread_id, research_obj)
+        except Exception as e:
+            logger.warning(f"Failed to generate/store thread research: {e}")
+
     async def _generate_title_task(self, thread_id: str, first_user_message: str) -> None:
         """Fire-and-forget: generate a short title and update thread when ready."""
         try:
@@ -66,7 +78,6 @@ class ThreadService:
         self, 
         thread_id: str, 
         user_message: str,
-        user_intent: Optional[str] = None,  
     ) -> None:
         """Main entry point for styling conversations."""
         try:
@@ -79,12 +90,25 @@ class ThreadService:
                 asyncio.create_task(self._generate_title_task(thread_id, user_message))
 
             user_data = self.users_interface.get_relevant_context(user_id) if user_id else {}
+            # Parse thread.research to a Python object to pass separately
+            research_raw = (thread or {}).get("research") if thread else None
+            thread_research_obj: Any = None
+            if research_raw:
+                if isinstance(research_raw, str):
+                    try:
+                        import json as _json
+                        thread_research_obj = _json.loads(research_raw)
+                    except Exception:
+                        thread_research_obj = {"text": research_raw}
+                elif isinstance(research_raw, dict):
+                    thread_research_obj = research_raw
+                else:
+                    thread_research_obj = {"text": str(research_raw)}
 
             self.messages_interface.create(
                 thread_id=thread_id,
                 role="user",
                 content=user_message,
-                metadata={"intent": user_intent}
             )
 
             conversation_history = self.messages_interface.get_conversation_history(thread_id)
@@ -117,6 +141,7 @@ class ThreadService:
                 user_data=user_data,
                 conversation_history=conversation_history,  
                 outfit_history=outfit_history,
+                thread_research=thread_research_obj,
                 on_single_outfit=lambda outfit, register_callback, outfit_count: asyncio.create_task(
                     self._process_single_outfit_with_callback(
                         outfit=outfit,

@@ -18,59 +18,28 @@ GPT_5_CHAT = 'gpt-5-chat-latest'
 
 GPT_IMAGE_1 = "gpt-image-1"
 
-
 # CORE FUNCTIONALITY CONFIGS ===============================
 
-# For generating outfit recommendations with structured JSON output
-# Category: "outfit_generation"
 OUTFIT_GENERATION = {
-    "model": GPT_4O_MINI,
-    # "model": GPT_4_1,
-    # "model": GPT_4O_SEARCH,
+    "model": GPT_4_1,
     # "model": GPT_O4_MINI,
-    # "model": GPT_5,
-    # "model": GPT_5_MINI,
-    # "model": GPT_5_NANO,
-    # "model": GPT_5_CHAT,
+
 }
 
-# For ranking and scoring product search results with visual analysis
-# Category: "product_ranking"
 PRODUCT_RANKING = {
-    # "model": GPT_4O_MINI,
-"model": GPT_O4_MINI,
-    # "model": GPT_4O,
-    # "model": GPT_4_1,
-    # "model": GPT_5_MINI,
-    # "model": GPT_5_NANO,
-}
+#     "model": GPT_O4_MINI,
+    "model": GPT_4_1,
 
-# For conversational responses and context gathering
-# Category: "thread_chat"
-CHAT_MODEL = {
-    "model": GPT_4O_MINI
-    # "model": GPT_5_MINI
-}
-
-# For decision making (outfit generation vs chat)
-# Category: "decision_making"
-CONVERSATION_DECISION = {
-    "model": GPT_4O_MINI,
-}
-
-# For modifying individual items based on user feedback
-# Category: "item_modification"
-ITEM_MODIFICATION = {
-    "model": GPT_4O_MINI,
 }
 
 TITLE_GENERATION = {
        "model": GPT_4_1,
 }
 
-# For generating short prompt suggestions for the user
-# Category: "prompt_suggestions"
 PROMPT_SUGGESTIONS = {
-       "model": GPT_4_1,
+       "model": GPT_5_MINI,
 }
 
+THREAD_RESEARCH = {
+       "model": GPT_5_MINI,
+}

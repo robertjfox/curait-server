@@ -10,15 +10,6 @@ logger = logging.getLogger(__name__)
 
 
 def get_user_selfie_url(filename: str) -> str:
-    """
-    Get public URL for a user's selfie.
-    
-    Args:
-        filename: Filename in the bucket (e.g. "user_face_victoria_banks.png")
-        
-    Returns:
-        Public URL of the selfie
-    """
     supabase = get_supabase_client()
     bucket = "user-selfies"
     
@@ -32,18 +23,6 @@ def get_user_selfie_url(filename: str) -> str:
 
 
 def get_user_avatar_url(user_id: str) -> str:
-    """
-    Get public URL for a user's full body avatar image from user-avatars bucket.
-    
-    Args:
-        user_id: User ID to look up
-        
-    Returns:
-        Public URL of the avatar image
-        
-    Raises:
-        Exception if user avatar cannot be found or accessed
-    """
     supabase = get_supabase_client()
     bucket = "user-avatars"
     
@@ -58,12 +37,6 @@ def get_user_avatar_url(user_id: str) -> str:
 
 
 def list_user_selfies() -> List[str]:
-    """
-    List all selfie filenames in the bucket.
-    
-    Returns:
-        List of all filenames in the bucket
-    """
     supabase = get_supabase_client()
     bucket = "user-selfies"
     

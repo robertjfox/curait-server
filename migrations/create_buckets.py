@@ -36,6 +36,7 @@ def create_storage_buckets():
             {"id": "vton-image-input-grid", "name": "vton-image-input-grid", "public": True},
             {"id": "processed-bg-removal-imgs", "name": "processed-bg-removal-imgs", "public": True},
             {"id": "user-selfies", "name": "user-selfies", "public": True},
+            {"id": "user-avatars", "name": "user-avatars", "public": True},
         ]
         
         print("🗄️ Creating Supabase Storage Buckets")

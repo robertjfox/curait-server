@@ -54,11 +54,6 @@ class ProductRankingService:
                     )
                     grid_data_uri = f"data:image/jpeg;base64,{base64.b64encode(img_bytes).decode('ascii')}"
 
-
-                    grid_time = time.time() - start_time
-                    logger.info(f"Grid creation time: {grid_time:.1f} for {ranking_keywords}")
-
-                    start_time = time.time()
                 except Exception as grid_err:
                     logger.error(f"🖼️ GRID CREATION FAILED: {grid_err}")
                     # Fallback: return products with images unchanged with default ratings
@@ -75,8 +70,6 @@ class ProductRankingService:
                         outfit_row=outfit_row,
                     )
 
-                    ranking_time = time.time() - start_time
-                    logger.info(f"Ranking time: {ranking_time:.1f} for {ranking_keywords}")
                 except Exception as ranking_err:
                     logger.warning(f"Failed to rank products: {ranking_err}")
                     # Fallback: return products with images unchanged with default ratings
@@ -85,7 +78,7 @@ class ProductRankingService:
                     return fallback_results, fallback_ratings
 
                 # Rank and sort results using products_with_images instead of head
-                sorted_indices = sorted(range(n), key=lambda i: (-ratings[i], i))
+                sorted_indices = sorted(range(n), key=lambda i: (ratings[i], i))
                 ranked_all: List[Dict[str, Any]] = []
                 for idx in sorted_indices:
                     product = products_with_images[idx].copy()
@@ -93,6 +86,9 @@ class ProductRankingService:
                     product["original_index"] = idx
                     ranked_all.append(product)
                 final_ranked = ranked_all[:top_k]
+
+                # filter out results with ranking 0
+                final_ranked = [r for r in final_ranked if r["ranking"] is not 0]
 
                 return final_ranked, ratings
 

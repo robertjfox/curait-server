@@ -52,7 +52,6 @@ class ColoredFormatter(logging.Formatter):
         'main': ' ⚙️ CONFIG ',      # Main app startup/shutdown logs
         
         # Utils related
-        'utils.image_processing.background_removal': ' 🛠️ UTILS ',
         'utils.image_processing.create_image_grid': ' 🖼️ GRID ',
         'utils.response_handler_utils': ' 🛠️ UTILS ',
         'utils.search_client_utils': ' 🛠️ UTILS ',
@@ -175,7 +174,6 @@ def test_log_prefixes():
         'VTON_SERVICE': logging.getLogger('services.virtual_tryon_service'),
         'CONFIG': logging.getLogger('_config.master_config'),
         'OUTFIT_GEN': logging.getLogger('services.outfit_generation_service'),
-        'UTILS_BG': logging.getLogger('utils.image_processing.background_removal'),
         'OUTFIT_RESP': logging.getLogger('services.outfit_generation_service'),
         'USERS_ROUTER': logging.getLogger('api.routers.users'),
         'TESTING_ROUTER': logging.getLogger('api.routers.testing'),

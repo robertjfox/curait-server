@@ -1,13 +1,10 @@
 import io
 import time
 import uuid
-import os
-import asyncio
 import logging
 from typing import List, Optional, Tuple, Dict, Any
 from PIL import Image, ImageOps, ImageDraw, ImageFont
 import httpx
-import requests
 from clients.supabase_client import get_supabase_client
 from utils.image_processing.user_selfie_handler import get_user_selfie_url
 

@@ -3,12 +3,14 @@ import logging
 
 from models import ThreadCreateRequest, ThreadChatRequest
 from services.thread_service import ThreadService
+from services.prompt_suggestions_service import PromptSuggestionsService
 from interfaces.threads_interface import ThreadsInterface
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/threads", tags=["threads"])
 
 thread_service = ThreadService()
+prompt_suggestions_service = PromptSuggestionsService()
 threads_interface = ThreadsInterface()
 
 
@@ -24,6 +26,25 @@ async def create_thread(request: ThreadCreateRequest):
 
         if not thread_id:
             raise HTTPException(status_code=500, detail="Failed to create thread")
+
+        # Fire-and-forget: compute initial research and store on thread.context
+        try:
+            import asyncio
+            asyncio.create_task(thread_service._generate_thread_research_task(thread_id))
+        except Exception:
+            pass
+
+        # Fire-and-forget: generate prompt suggestions for the user
+        try:
+            import asyncio
+            asyncio.create_task(
+                prompt_suggestions_service.generate_and_save(
+                    request.user_id,
+                    ignore_throttle=True,
+                )
+            )
+        except Exception:
+            pass
 
         return {
             "success": True,
@@ -41,7 +62,6 @@ async def chat_in_thread(thread_id: str, request: ThreadChatRequest):
         await thread_service.route_user_message(
             thread_id=thread_id,
             user_message=request.message,
-            user_intent=request.user_intent,
         )
         
         return {

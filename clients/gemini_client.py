@@ -9,7 +9,7 @@ from clients.supabase_client import get_supabase_client
 from interfaces.outfits_interface import OutfitsInterface
 from utils.image_processing.image_gen import prepare_pil_for_upload, detect_image_mime_and_ext, compose_user_images_row, split_row_image_into_cells, load_user_avatar_from_url
 from utils.image_processing.user_selfie_handler import get_user_avatar_url
-from ai.prompts.image_generation import create_flatlay_prompt, create_virtual_tryon_prompt
+from ai.prompts.image_generation import create_flatlay_prompt, create_virtual_tryon_prompt, create_fullbody_avatar_prompt
 import time
 
 from PIL import Image
@@ -68,6 +68,7 @@ class GeminiClient:
 		"""Core image generation with error handling."""
 		try:
 			start_time = time.time()
+			logger.info("[GEMINI] ▶︎ request started")
 			response = self.client.models.generate_content(
 				model=self.MODEL,
 				contents=contents,
@@ -76,10 +77,10 @@ class GeminiClient:
 				) if contents and len(contents) > 1 else None
 			)
 			end_time = time.time()
-			logger.info(f"Gemini generation time: {end_time - start_time:.2f}s")
+			logger.info(f"[GEMINI] ✔︎ generation time: {end_time - start_time:.2f}s")
 			return self._extract_image_bytes(response)
 		except Exception as e:
-			logger.error(f"Gemini generation error: {e}")
+			logger.error(f"[GEMINI] ❌ generation error: {e}")
 			return None
 
 	def generate_virtual_tryon(self, *, grid_bytes: bytes, user_id: str) -> Optional[bytes]:
@@ -90,6 +91,22 @@ class GeminiClient:
 		
 		prompt = create_virtual_tryon_prompt()
 		return self._generate_image([prompt, user_img, grid_img])
+
+	def generate_fullbody_avatar(self, *, selfie_bytes: bytes, height_cm: float | None, weight_kg: float | None, gender: str | None = None) -> Optional[bytes]:
+		"""Generate a full-body studio avatar from a selfie using Gemini.
+
+		The selfie should depict the user's face clearly. The output will be a
+		front-facing full-body shot matching our standard reference style.
+		"""
+		try:
+			selfie_img = prepare_pil_for_upload(Image.open(BytesIO(selfie_bytes)))
+		except Exception:
+			# If bytes fail to open, rethrow after logging
+			logger.exception("Failed to load selfie bytes for avatar generation")
+			raise
+
+		prompt = create_fullbody_avatar_prompt(height_cm=height_cm, weight_kg=weight_kg, gender=gender)
+		return self._generate_image([prompt, selfie_img])
 
 
 	async def generate_flatlay_and_upload(self, outfits: List[Dict[str, Any]], *, user_id: str, thread_id: Optional[str] = None) -> List[Optional[str]]:

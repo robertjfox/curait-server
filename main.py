@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 from services.virtual_tryon_service import VirtualTryOnService
 from api.routers.threads import router as threads_router
 from api.routers.virtual_tryon import router as virtual_tryon_router
+from api.routers.avatars import router as avatars_router
 from api.routers.prompt_suggestions import router as prompt_suggestions_router
 from api.routers.outfits import router as outfits_router
 
@@ -58,6 +59,7 @@ app.add_middleware(
 # Register routers
 app.include_router(threads_router)
 app.include_router(virtual_tryon_router)
+app.include_router(avatars_router)
 app.include_router(prompt_suggestions_router)
 app.include_router(outfits_router)
 
