@@ -88,7 +88,7 @@ class ProductRankingService:
                 final_ranked = ranked_all[:top_k]
 
                 # filter out results with ranking 0
-                final_ranked = [r for r in final_ranked if r["ranking"] is not 0]
+                final_ranked = [r for r in final_ranked if r["ranking"] != 0]
 
                 return final_ranked, ratings
 

@@ -12,3 +12,4 @@ tiktoken
 psutil
 google-generativeai>=0.8.0
 google-genai>=1.0.0
+python-multipart==0.0.20

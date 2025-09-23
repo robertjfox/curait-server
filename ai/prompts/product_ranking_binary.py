@@ -13,7 +13,6 @@ def build_product_ranking_prompt(
     outfit_row: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
     N = num_results
-
     # Compact background for fewer tokens
     bg = {
         "keywords": item_context.get("keywords") or "",
