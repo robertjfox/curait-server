@@ -67,7 +67,8 @@ def create_fullbody_avatar_prompt(
     return (
         "Use the first image as the person's face/identity reference. "
         "Generate a FULL-BODY studio photo of the same person standing, front-facing, neutral stance, "
-        "feet hip‑width apart, arms relaxed at sides. NO SMILING. NO OPEN MOUTH. MODEL GAZE. "
+        "feet hip‑width apart, arms relaxed at sides. No smiling. Not an angry look but a model gaze. "
+        "Make the face look natural and aesthetic without changing the user's face. Fix any bad hair or bad complexion."
         "Plain seamless white background, even soft lighting, natural skin tones, no shadows cut off, no text. "
         "Camera: full-length portrait, subject centered, include head to shoes with small margin. "
         "Image ratio approximately 3:4 (portrait orientation, slightly taller than wide). "
