@@ -21,7 +21,7 @@ def generate_outfit_schema(queue_multiplier: int):
     num_outfits = config.NUM_OUTFITS_IN_GRID * queue_multiplier
     clothing_items = config.CLOTHING_ITEMS
 
-    # Build outfits array with name and items array (no description)
+    # Build outfits array with name and items array
     item_object_schema = {
         "type": "object",
         "properties": {

@@ -28,6 +28,7 @@ from api.routers.virtual_tryon import router as virtual_tryon_router
 from api.routers.avatars import router as avatars_router
 from api.routers.prompt_suggestions import router as prompt_suggestions_router
 from api.routers.outfits import router as outfits_router
+from api.routers.explore_ideas import router as explore_ideas_router
 
 
 # Initialize services
@@ -62,6 +63,7 @@ app.include_router(virtual_tryon_router)
 app.include_router(avatars_router)
 app.include_router(prompt_suggestions_router)
 app.include_router(outfits_router)
+app.include_router(explore_ideas_router)
 
 
 @app.get("/")
@@ -80,6 +82,7 @@ async def detailed_health_check():
 			"/api/virtual-try-on",
 			"/api/prompt-suggestions/{user_id}/generate",
 			"/api/outfits/{outfit_id}/search-and-rank",
+		"/api/explore-ideas/generate-research",
 		]
 	}
 
@@ -90,7 +93,7 @@ if __name__ == "__main__":
 		"main:app",
 		host="0.0.0.0",
 		port=8000,
-		reload=False,  # Disabled auto-reload - manual restart required for code changes
+		reload=True,  # Disabled auto-reload - manual restart required for code changes
 		log_level="info",
 		access_log=False,
 	) 

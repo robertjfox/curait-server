@@ -108,7 +108,6 @@ class GeminiClient:
 		prompt = create_fullbody_avatar_prompt(height_cm=height_cm, weight_kg=weight_kg, gender=gender)
 		return self._generate_image([prompt, selfie_img])
 
-
 	async def generate_flatlay_and_upload(self, outfits: List[Dict[str, Any]], *, user_id: str, thread_id: Optional[str] = None) -> List[Optional[str]]:
 		"""Generate and upload flatlay images for multiple outfits."""
 		def _generate():
@@ -168,7 +167,6 @@ class GeminiClient:
 		
 		return urls
 
-
 	def launch_flatlay_task(
 			self, 
 			*, 
@@ -193,7 +191,6 @@ class GeminiClient:
 							pass
 
 		return asyncio.create_task(_task())
-
 
 def get_gemini_client() -> GeminiClient:
 	"""Get or create a GeminiClient instance."""

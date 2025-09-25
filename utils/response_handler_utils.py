@@ -22,7 +22,7 @@ def extract_outfits_from_response(response: str) -> List[Dict[str, Any]]:
         except json.JSONDecodeError:
             pass
         
-        # Match minimal outfit objects with name and items (no description required)
+        # Match minimal outfit objects with name and items
         outfit_pattern = r'\{\s*"name"\s*:\s*"[^"]*"\s*,\s*"items"\s*:\s*\[[^\]]*\]\s*\}'
         
         for match in re.finditer(outfit_pattern, response, re.DOTALL):

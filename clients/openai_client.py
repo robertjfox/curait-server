@@ -5,7 +5,6 @@ from typing import Dict, Any, List, Optional, Callable
 import _config as config
 import json
 import httpx
-from datetime import datetime, timezone
 import time
 
 # Prompts
@@ -29,7 +28,13 @@ from _config.model_config import (
     TITLE_GENERATION,       
     PROMPT_SUGGESTIONS,
     THREAD_RESEARCH,
+    DEEP_TREND_RESEARCH,
+    EXPLORE_IDEAS,
 )
+
+from ai.prompts.deep_trend_research import build_deep_trend_research_input
+from ai.prompts.explore_ideas import build_explore_ideas_input
+from ai.schemas.explore_ideas import generate_explore_ideas_schema
 
 logger = logging.getLogger(__name__)
 
@@ -57,13 +62,12 @@ class OpenAIClient:
         user_data: Dict[str, Any],
         conversation_history: List[Dict[str, Any]] = [],
         outfit_history: List[Dict[str, Any]] = [],
-        thread_research: Any = None,
         on_outfit_batch: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
         on_single_outfit: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> None:
         
         schema = generate_outfit_schema(queue_multiplier)
-        messages = generate_outfit_prompts(user_data, outfit_history, conversation_history, queue_multiplier, thread_research)
+        messages = generate_outfit_prompts(user_data, outfit_history, conversation_history, queue_multiplier)
 
         start_time = time.time()
 
@@ -290,6 +294,118 @@ class OpenAIClient:
             return cleaned[:4]
         except Exception as e:
             logger.warning(f"Prompt suggestions failed, falling back: {e}")
+            return []
+
+    async def generate_deep_trend_research(
+        self,
+        *,
+        gender: str,
+        date_iso: str,
+    ) -> Dict[str, Any]:
+        """Run deeper, time-aware macro trend research per gender. Returns dict or {text} fallback.
+
+        Uses DEEP_TREND_RESEARCH model. Input kept minimal and explicit.
+        """
+        model_name = DEEP_TREND_RESEARCH["model"]
+        logger.info(f"[DEEP_TREND] start gender={gender} date={date_iso} model={model_name}")
+        try:
+            start_time = time.time()
+
+            # Use Responses API with a single input string (no separate instructions arg)
+            input_text = build_deep_trend_research_input(gender=gender, date_iso=date_iso)
+            response = await self.client.responses.create(
+                model=model_name,
+                input=input_text,
+                tools=[{"type": "web_search_preview"}],
+                top_p=1,
+                # Let the model choose length; remove hard output cap
+            )
+
+            content = (getattr(response, "output_text", "") or "").strip()
+            if not content:
+                # Best-effort extraction for SDK variants
+                try:
+                    output = getattr(response, "output", None)
+                    if output and len(output) > 0:
+                        blocks = getattr(output[0], "content", None)
+                        if blocks and len(blocks) > 0:
+                            text_block = getattr(blocks[0], "text", None)
+                            if text_block is not None:
+                                # text_block may be a simple string, object with .value, or dict
+                                if isinstance(text_block, str):
+                                    content = text_block.strip()
+                                else:
+                                    value = getattr(text_block, "value", None)
+                                    if value is None and isinstance(text_block, dict):
+                                        value = text_block.get("value")
+                                    if value is not None:
+                                        content = str(value).strip()
+                                    else:
+                                        content = str(text_block).strip()
+                except Exception:
+                    pass
+
+            elapsed = (time.time() - start_time) * 1000
+            logger.info(f"[DEEP_TREND] response received ms={int(elapsed)} len={len(content)}")
+            logger.info("[DEEP_TREND] returning text research")
+            return {"text": content}
+        except Exception as e:
+            logger.warning(f"[DEEP_TREND] failed: {e}")
+            return {"text": ""}
+
+    async def generate_explore_ideas(
+        self,
+        *,
+        gender: str,
+        trend_inspiration: str,
+        previous_titles: List[str],
+    ) -> List[Dict[str, str]]:
+        """Return 4 simple ideas: [{title, description}]. Uses Responses API with web search tool if available.
+        """
+        from datetime import date
+        date_iso = date.today().isoformat()
+        
+        model_name = EXPLORE_IDEAS["model"]
+        logger.info(f"[IDEAS] start gender={gender} date={date_iso} model={model_name} prev_titles={len(previous_titles)}")
+
+        try:
+            input_text = build_explore_ideas_input(
+                gender=gender,
+                date_iso=date_iso,
+                trend_inspiration=trend_inspiration,
+                previous_titles=previous_titles,
+            )
+            # Prefer structured output via chat.completions with response_format
+            schema = generate_explore_ideas_schema()
+
+            logger.info(f"[IDEAS] input_text: {input_text}")
+            
+            response = await self.client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": input_text}],
+                response_format=schema,
+                top_p=1,
+            )
+
+            content = (response.choices[0].message.content or "").strip()
+            ideas: List[Dict[str, str]] = []
+            try:
+                parsed = json.loads(content)
+                payload = parsed.get("ideas") if isinstance(parsed, dict) else None
+                if isinstance(payload, list):
+                    for item in payload:
+                        if isinstance(item, dict):
+                            ideas.append({
+                                "title": str(item.get("title", "")).strip(),
+                                "description": str(item.get("description", "")).strip(),
+                                "concept_outfits": item.get("concept_outfits", {}),
+                            })
+            except Exception:
+                pass
+
+            return ideas[:4]
+        except Exception as e:
+            logger.warning(f"[IDEAS] failed: {e}")
             return []
 
 

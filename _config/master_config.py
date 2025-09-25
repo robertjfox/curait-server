@@ -25,7 +25,7 @@ SHOPPING_RESULTS_TO_RETURN = int(os.getenv("SHOPPING_RESULTS_TO_RETURN", "10"))
 
 
 CLOTHING_ITEMS = [
-   "outerwear",  "tops", "dresses", "bottoms", "footwear",
+   "outerwear",  "tops", "dresses", "bottoms", "footwear", "accessories"
 ]
 
 # Product ranking toggle

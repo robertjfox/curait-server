@@ -2,7 +2,6 @@ import json
 from typing import Dict, Any, List, Tuple
 from utils.outfit_utils import format_outfit_history
 import _config as config
-import os
 import logging
 
 logger = logging.getLogger(__name__)
@@ -13,8 +12,6 @@ def _gender_gate(user_gender: str) -> Tuple[str, str]:
     kw = "mens" if g == "male" else "womens" if g == "female" else "mens|womens"
     label = user_gender or "unspecified"
     return kw, label
-
-# 
 
 def generate_outfit_system_prompt(user_gender: str = None) -> str:
     gender_kw, gender_label = _gender_gate(user_gender)
@@ -29,10 +26,11 @@ def generate_outfit_system_prompt(user_gender: str = None) -> str:
         "- Trend data is meant to be guiding, but always make the situational context THE MOST IMPORTANT FACTOR IN TERMS OF DIRECTION.\n\n"
 
         "COMPOSITION RULES:\n"
-        f"- 3-4 items per outfit.\n"
+        f"- 3-5 items per outfit.\n"
         f"- Each item.type ∈ [{', '.join(config.CLOTHING_ITEMS)}]; no duplicate roles per outfit.\n"
         "- Practical combos only (e.g., no blazer+shorts; no dress+skirt together; no shorts with winter coat).\n"
         "- Cohesive palette and sensible layering for the weather.\n\n"
+        "- Max 1 accessory per outfit. Accessories should be belts, glasses, bags, etc. Nothing uncommon.\n"
 
         "GENDER RULES:\n"
         f"- User gender='{gender_label}'. All items must suit this gender.\n"
@@ -56,7 +54,6 @@ def generate_outfit_user_prompt(
     conversation_history: List[Dict[str, Any]],
     formatted_outfit_history: str,
     num_outfits: int,
-    thread_research: Any,
 ) -> str:
     safe_user: Dict[str, Any] = user_data or {}
     profile: Dict[str, Any] = {k: v for k, v in safe_user.items() if k != "context"}
@@ -65,26 +62,21 @@ def generate_outfit_user_prompt(
 
     return (
         f"Create {num_outfits} distinct, complete outfit(s) using the structured function.\n"
-        "- If conversation/location/weather conflicts with profile, the conversation WINS.\n"
-        "- Use destination from conversation for weather; profile location is just background vibe.\n"
-        "- Treat profile/context as baseline for fit, proportions, coverage, comfort, colors, constraints.\n"
-        "- Avoid repeating items from this thread; keep options fresh but practical.\n"
+        "- Avoid repeating items from this thread; keep options fresh.\n"
         "- Follow the ORIGINAL MESSAGE and MOST RECENT MESSAGE closely. This is the primary instruction.\n\n"
-        "- But make sure you take into accouunt the instructions from the CONVERSATION_HISTORY, unless the user has changed their mind.\n\n"
+        "- But make sure you take into accouunt the instructions from the CONVERSATION_HISTORY.\n\n"
         "- If OUTFIT_HISTORY has feedback, use it to improve and refine the direction of the outfits.\n\n"
-        "- Try to generate FRESH outfits and ideas, not just variations of the same outfits.\n\n"
-        "- Use the THREAD_RESEARCH to guide the direction of the outfits.\n\n"
+        "- Try to generate FRESH and TRENDY and UNIQUE outfits and ideas, not just variations of the same outfits.\n\n"
+        "- If there are EXAMPLE OUTFITS, Create variations of them. \n\n"
+        "- If the OUTFIT HISTORY IS EMPTY, USE THE EXACT EXAMPLE OUTFITS!!!!"
 
         "USER_PROFILE:\n" + j(profile) + "\n\n"
 
         "USER_CONTEXT:\n" + j(ctx) + "\n\n"
 
-        "THREAD_RESEARCH (guidance, not rules):\n" + j(thread_research) + "\n\n"
-
         "CONVERSATION_HISTORY:\n" + j(conversation_history) + "\n\n"
 
         "OUTFIT_HISTORY:\n" + formatted_outfit_history + "\n\n"
-        "Return via the provided function schema ONLY."
     )
 
 def format_convo_history(conversation_history: List[Dict[str, Any]]) -> str:
@@ -131,7 +123,6 @@ def generate_outfit_prompts(
     outfit_history: List[Dict[str, Any]],
     conversation_history: List[Dict[str, Any]],
     queue_multiplier: int,
-    thread_research: Any,
 ) -> Tuple[str, str]:
     
     convo_history = format_convo_history(conversation_history)
@@ -141,22 +132,13 @@ def generate_outfit_prompts(
 
     formatted_outfit_history = format_outfit_history(outfit_history)
 
-    # logger.info(f"🧵 Formatted outfit history: {formatted_outfit_history}")
-    # log thread research
-    logger.info(f"🧵 Thread research: {thread_research}")
-
-
     system_prompt = generate_outfit_system_prompt(user_gender)
     user_prompt = generate_outfit_user_prompt(
         user_data, 
         convo_history,
         formatted_outfit_history, 
         num_outfits,
-        thread_research,
     )
-
-    # logger.info(f"🧵 System prompt: {system_prompt}")
-    # logger.info(f"🧵 User prompt: {user_prompt}")
 
     return [
             {"role": "system", "content": system_prompt},

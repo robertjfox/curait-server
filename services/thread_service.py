@@ -82,6 +82,8 @@ class ThreadService:
         """Main entry point for styling conversations."""
         try:
 
+            logger.info(f"User message: {user_message}")
+
             thread = self.threads_interface.get(thread_id)
             thread_title = thread.get("title", "Thread Title")
             user_id = thread.get("user_id") if thread else None
@@ -90,20 +92,6 @@ class ThreadService:
                 asyncio.create_task(self._generate_title_task(thread_id, user_message))
 
             user_data = self.users_interface.get_relevant_context(user_id) if user_id else {}
-            # Parse thread.research to a Python object to pass separately
-            research_raw = (thread or {}).get("research") if thread else None
-            thread_research_obj: Any = None
-            if research_raw:
-                if isinstance(research_raw, str):
-                    try:
-                        import json as _json
-                        thread_research_obj = _json.loads(research_raw)
-                    except Exception:
-                        thread_research_obj = {"text": research_raw}
-                elif isinstance(research_raw, dict):
-                    thread_research_obj = research_raw
-                else:
-                    thread_research_obj = {"text": str(research_raw)}
 
             self.messages_interface.create(
                 thread_id=thread_id,
@@ -141,7 +129,6 @@ class ThreadService:
                 user_data=user_data,
                 conversation_history=conversation_history,  
                 outfit_history=outfit_history,
-                thread_research=thread_research_obj,
                 on_single_outfit=lambda outfit, register_callback, outfit_count: asyncio.create_task(
                     self._process_single_outfit_with_callback(
                         outfit=outfit,

@@ -16,14 +16,16 @@ GPT_5_MINI = "gpt-5-mini-2025-08-07"
 GPT_5_NANO = "gpt-5-nano-2025-08-07"
 GPT_5_CHAT = 'gpt-5-chat-latest'
 
+GPT_O4_MINI_DEEP_RESEARCH = "o4-mini-deep-research-2025-06-26"
+
 GPT_IMAGE_1 = "gpt-image-1"
 
 # CORE FUNCTIONALITY CONFIGS ===============================
 
 OUTFIT_GENERATION = {
     "model": GPT_4_1,
-    # "model": GPT_O4_MINI,
-
+#     "model": GPT_O4_MINI,
+#     "model": GPT_5_MINI,
 }
 
 PRODUCT_RANKING = {
@@ -42,4 +44,15 @@ PROMPT_SUGGESTIONS = {
 
 THREAD_RESEARCH = {
        "model": GPT_5_MINI,
+}
+
+DEEP_TREND_RESEARCH = {
+       "model": GPT_O4_MINI_DEEP_RESEARCH,
+}
+
+EXPLORE_IDEAS = {
+       # "model": GPT_5,
+       "model": GPT_5_MINI,
+       # "model": GPT_4_1,
+       # "model": GPT_O4_MINI,
 }

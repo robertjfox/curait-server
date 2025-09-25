@@ -26,7 +26,8 @@ def create_flatlay_prompt(outfits: List[Dict[str, Any]]) -> str:
     {background_instruction}
     Keep each avatars body proportions EXACTLY as they are now, do not increase the height.
     You may slightly change the body positioning to give a bit of movement, like in a model photoshoot.
-    The user should be looking directly at the camera. KEEP A HIGH FIDELITY OF THE USER'S FACE.
+    The vibe of the clothing should be realistic and trendy, like a pinterest post. Think FASHION.
+    The user should be looking directly at the camera. KEEP A HIGH FIDELITY OF THE USER'S FACE. CLOSED MOUTH. MODEL GAZE.
     Keep a bold red line between each cell.
     NEVER include any text in the image.
     """
@@ -66,7 +67,7 @@ def create_fullbody_avatar_prompt(
     return (
         "Use the first image as the person's face/identity reference. "
         "Generate a FULL-BODY studio photo of the same person standing, front-facing, neutral stance, "
-        "feet hip‑width apart, arms relaxed at sides, slight friendly smile. "
+        "feet hip‑width apart, arms relaxed at sides. NO SMILING. NO OPEN MOUTH. MODEL GAZE. "
         "Plain seamless white background, even soft lighting, natural skin tones, no shadows cut off, no text. "
         "Camera: full-length portrait, subject centered, include head to shoes with small margin. "
         "Image ratio approximately 3:4 (portrait orientation, slightly taller than wide). "
