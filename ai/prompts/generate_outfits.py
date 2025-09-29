@@ -3,6 +3,7 @@ from typing import Dict, Any, List, Tuple
 from utils.outfit_utils import format_outfit_history
 import _config as config
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +20,6 @@ def generate_outfit_system_prompt(user_gender: str = None) -> str:
     return (
         "You are an expert fashion stylist returning ONLY a structured function call.\n"
         "Goal: brainstorm shoppable, realistic outfits that feel fresh and wearable.\n\n"
-
-        "PRIORITIES:\n"
-        "- Fit the session context (occasion, dress code, activity, weather, mood).\n"
-        "- Keep looks non-repetitive (vs. outfit history).\n\n"
-        "- Trend data is meant to be guiding, but always make the situational context THE MOST IMPORTANT FACTOR IN TERMS OF DIRECTION.\n\n"
 
         "COMPOSITION RULES:\n"
         f"- 3-5 items per outfit.\n"
@@ -54,91 +50,55 @@ def generate_outfit_user_prompt(
     conversation_history: List[Dict[str, Any]],
     formatted_outfit_history: str,
     num_outfits: int,
+    explore_idea_context: Optional[Dict[str, Any]] = None,
+    trend_outfits_context: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
+    
     safe_user: Dict[str, Any] = user_data or {}
-    profile: Dict[str, Any] = {k: v for k, v in safe_user.items() if k != "context"}
-    ctx: Dict[str, Any] = safe_user.get("context") or {}
+    # all we care about is age and location
+    safe_user = {k: v for k, v in safe_user.items() if k in ["age", "location"]}
+    ctx: Dict[str, Any] = user_data.get("context") or {}
     j = lambda o: json.dumps(o or {}, separators=(",", ":"))
 
     return (
         f"Create {num_outfits} distinct, complete outfit(s) using the structured function.\n"
-        "- Avoid repeating items from this thread; keep options fresh.\n"
-        "- Follow the ORIGINAL MESSAGE and MOST RECENT MESSAGE closely. This is the primary instruction.\n\n"
-        "- But make sure you take into accouunt the instructions from the CONVERSATION_HISTORY.\n\n"
-        "- If OUTFIT_HISTORY has feedback, use it to improve and refine the direction of the outfits.\n\n"
-        "- Try to generate FRESH and TRENDY and UNIQUE outfits and ideas, not just variations of the same outfits.\n\n"
-        "- If there are EXAMPLE OUTFITS, Create variations of them. \n\n"
-        "- If the OUTFIT HISTORY IS EMPTY, USE THE EXACT EXAMPLE OUTFITS!!!!"
+        f"- Try to keep everything within the EXPLORE IDEA CONTEXT.\n"
+        f"- If the OUTFIT HISTORY is empty, use the EXACT TREND OUTFIT EXAMPLES.\n\n"
 
-        "USER_PROFILE:\n" + j(profile) + "\n\n"
-
-        "USER_CONTEXT:\n" + j(ctx) + "\n\n"
-
-        "CONVERSATION_HISTORY:\n" + j(conversation_history) + "\n\n"
-
-        "OUTFIT_HISTORY:\n" + formatted_outfit_history + "\n\n"
+        + (f"EXPLORE_IDEA_CONTEXT:\n{j(explore_idea_context)}\n\n" if explore_idea_context else "")
+        + f"USER_PROFILE:\n{j(safe_user)}\n\n"
+        + f"USER_CONTEXT:\n{j(ctx)}\n\n"
+        + f"OUTFIT_HISTORY:\n{formatted_outfit_history}\n\n"
+        + ("CONVERSATION_HISTORY:\n" + j(conversation_history) + "\n\n" if conversation_history else "")
+        + (f"TREND OUTFIT EXAMPLES:\n{j(trend_outfits_context)}\n\n" if trend_outfits_context else "")
     )
 
-def format_convo_history(conversation_history: List[Dict[str, Any]]) -> str:
-    """Format conversation history into a readable string, filtering out empty messages."""
-    lines: List[str] = []
-    
-    if not conversation_history:
-        return ""
-    
-    # Process all messages except the most recent one
-    messages_to_process = conversation_history[:-1] if len(conversation_history) > 1 else []
-    
-    counter = 1
-    for msg in messages_to_process:
-        role = msg.get("role", "")
-        content = str(msg.get("content", "")).strip()
-        
-        # Skip messages with blank content or "more outfits"
-        if not content or content.lower() == "more outfits":
-            continue
-            
-        if role == "user":
-            if counter == 1:
-                lines.append("ORIGINAL MESSAGE")
-            lines.append(f"{counter}. {content}")
-            counter += 1
-    
-    # Add most recent message separately
-    if conversation_history:
-        most_recent = conversation_history[-1]
-        most_recent_role = most_recent.get("role", "")
-        most_recent_content = str(most_recent.get("content", "")).strip()
-        
-        if most_recent_role == "user" and most_recent_content and most_recent_content.lower() != "more outfits":
-            if lines:
-                lines.append("")
-            lines.append("MOST RECENT MESSAGE:")
-            lines.append(most_recent_content)
-    
-    return "\n".join(lines)
 
 def generate_outfit_prompts(
     user_data: Dict[str, Any],
     outfit_history: List[Dict[str, Any]],
     conversation_history: List[Dict[str, Any]],
-    queue_multiplier: int,
+    double_batch: bool,
+    explore_idea_context: Optional[Dict[str, Any]] = None,
+    trend_outfits_context: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[str, str]:
     
-    convo_history = format_convo_history(conversation_history)
-
     user_gender = (user_data or {}).get("gender")
-    num_outfits = config.NUM_OUTFITS_IN_GRID * queue_multiplier
+    num_outfits = config.NUM_OUTFITS_IN_GRID * (2 if double_batch else 1)
 
     formatted_outfit_history = format_outfit_history(outfit_history)
 
     system_prompt = generate_outfit_system_prompt(user_gender)
     user_prompt = generate_outfit_user_prompt(
-        user_data, 
-        convo_history,
-        formatted_outfit_history, 
+        user_data,
+        conversation_history,
+        formatted_outfit_history,
         num_outfits,
+        explore_idea_context,
+        trend_outfits_context,
     )
+
+    logger.info(f"[OPENAI] user prompt: {user_prompt}")
 
     return [
             {"role": "system", "content": system_prompt},

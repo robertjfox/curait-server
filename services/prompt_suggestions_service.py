@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 
 from interfaces.users_interface import UsersInterface
 from interfaces.threads_interface import ThreadsInterface
-from interfaces.messages_interface import MessagesInterface
 from clients.openai_client import get_openai_client
 
 logger = logging.getLogger(__name__)
@@ -16,7 +15,6 @@ class PromptSuggestionsService:
     def __init__(self) -> None:
         self.users = UsersInterface()
         self.threads = ThreadsInterface()
-        self.messages = MessagesInterface()
         self.openai = get_openai_client()
 
     async def generate_and_save(self, user_id: str, *, max_threads: int = 10, ignore_throttle: bool = False) -> List[str]:
@@ -51,9 +49,10 @@ class PromptSuggestionsService:
             recent_threads = self.threads.list_recent_by_user(user_id, limit=max_threads)
             first_messages: List[str] = []
             for t in recent_threads:
-                msg = self.messages.get_first_user_message(t["id"]) if t and t.get("id") else None
-                if msg:
-                    first_messages.append(msg)
+                comments = self.threads.get_comments(t["id"]) if t and t.get("id") else []
+                # Get the first comment
+                if comments:
+                    first_messages.append(comments[0].get("message", ""))
 
             prompts = await self.openai.generate_prompt_suggestions(
                 user_data=user_data,

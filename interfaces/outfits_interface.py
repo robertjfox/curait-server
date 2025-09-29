@@ -18,14 +18,14 @@ class OutfitsInterface:
     def create(
         self,
         thread_id: str,
-        message_id: str,
         name: str,
+        is_cached: bool = False,
     ) -> Optional[str]:
         """Create a new outfit and return its ID."""
         payload: Dict[str, Any] = {
             "thread_id": thread_id,
-            "message_id": message_id,
             "name": name,
+            "is_cached": is_cached,
         }
         try:
             res = self._supabase.table(self._table).insert(payload).execute()
@@ -106,3 +106,28 @@ class OutfitsInterface:
             return res.data
         except Exception:
             return None
+
+    def update_is_cached(self, outfit_id: str, is_cached: bool) -> bool:
+        """Update the is_cached flag for an outfit."""
+        try:
+            self._supabase.table(self._table).update(
+                {"is_cached": is_cached}
+            ).eq("id", outfit_id).execute()
+            return True
+        except Exception:
+            return False
+
+    def get_thread_outfits_with_ids(self, thread_id: str) -> List[Dict[str, Any]]:
+        """Get all outfits for a thread with their IDs and is_cached status."""
+        try:
+            res = (
+                self._supabase
+                .table(self._table)
+                .select("id, name, is_cached, created_at")
+                .eq("thread_id", thread_id)
+                .order("created_at")
+                .execute()
+            )
+            return res.data or []
+        except Exception:
+            return []

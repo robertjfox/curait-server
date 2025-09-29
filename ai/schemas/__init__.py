@@ -1,2 +1,2 @@
-from .outfits import generate_outfit_schema
+from .outfits import generate_outfit_schema, generate_single_outfit_schema
 from .prompt_suggestions import generate_prompt_suggestions_schema

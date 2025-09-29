@@ -5,6 +5,8 @@ from datetime import datetime
 
 class ThreadBase(BaseModel):
     context: Dict[str, Any] = {}
+    comments: List[Dict[str, Any]] = []  # JSONB field for user comments with message and timestamp
+    explore_idea_id: Optional[str] = None  # Link to explore idea
 
 
 class ThreadCreate(ThreadBase):

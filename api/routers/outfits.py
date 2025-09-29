@@ -8,7 +8,6 @@ router = APIRouter(prefix="/api/outfits", tags=["outfits"])
 
 service = OutfitGenerationService()
 
-
 @router.post("/{outfit_id}/search-and-rank", response_model=dict)
 async def search_and_rank_outfit(outfit_id: str):
 
@@ -23,4 +22,5 @@ async def search_and_rank_outfit(outfit_id: str):
         raise
     except Exception as e:
         logger.error(f"❌ Error searching/ranking outfit {outfit_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to process outfit {outfit_id}") 
+        raise HTTPException(status_code=500, detail=f"Failed to process outfit {outfit_id}")
+

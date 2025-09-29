@@ -103,8 +103,8 @@ class OutfitItemsInterface:
             # Simplified query - get all outfit items and their related data
             res = (
                 self._supabase.table(self._table)
-                .select("*, outfits(*, messages(thread_id, created_at))")
-                .eq("outfits.messages.thread_id", thread_id)
+                .select("*, outfits(*)")
+                .eq("outfits.thread_id", thread_id)
                 .execute()
             )
             

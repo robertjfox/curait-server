@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 class ThreadCreateRequest(BaseModel):
     user_id: str
+    explore_idea_id: Optional[str] = None
 
 
 class ThreadChatRequest(BaseModel):

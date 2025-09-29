@@ -41,10 +41,11 @@ CREATE TABLE messages (
 -- Outfits table: Generated styling recommendations
 CREATE TABLE outfits (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    thread_id UUID NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     description TEXT,
     outfit_order INTEGER DEFAULT 0,
+    is_cached BOOLEAN DEFAULT FALSE,
     vton_image_url TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -66,9 +67,9 @@ CREATE TABLE outfit_items (
 -- Indexes for performance
 CREATE INDEX idx_threads_user_id ON threads(user_id);
 CREATE INDEX idx_threads_updated_at ON threads(updated_at DESC);
-CREATE INDEX idx_messages_thread_id ON messages(thread_id);
-CREATE INDEX idx_messages_created_at ON messages(created_at);
-CREATE INDEX idx_outfits_message_id ON outfits(message_id);
+CREATE INDEX idx_threads_comments ON threads USING GIN (comments);
+CREATE INDEX idx_outfits_thread_id ON outfits(thread_id);
+CREATE INDEX idx_outfits_is_cached ON outfits(is_cached);
 CREATE INDEX idx_outfits_order ON outfits(outfit_order);
 CREATE INDEX idx_outfit_items_outfit_id ON outfit_items(outfit_id);
 CREATE INDEX idx_outfit_items_order ON outfit_items(item_order);
@@ -90,12 +91,12 @@ CREATE TRIGGER update_outfit_items_updated_at BEFORE UPDATE ON outfit_items FOR 
 
 -- Comments for documentation
 COMMENT ON TABLE users IS 'User profiles and long-lived style preferences';
-COMMENT ON TABLE threads IS 'Conversation threads for ChatGPT-style interactions';
-COMMENT ON TABLE messages IS 'Individual conversation turns within threads';
-COMMENT ON TABLE outfits IS 'AI-generated styling recommendations linked to assistant messages';
+COMMENT ON TABLE threads IS 'Conversation threads with embedded comments as JSONB';
+COMMENT ON TABLE outfits IS 'AI-generated styling recommendations linked to threads';
 COMMENT ON TABLE outfit_items IS 'Individual clothing items within styled outfits';
 
 COMMENT ON COLUMN users.context IS 'Long-lived user preferences and style profile (body type, style preferences, etc.)';
 COMMENT ON COLUMN threads.context IS 'Evolving conversation state (constraints, filters, learned preferences for this thread)';
-COMMENT ON COLUMN messages.metadata IS 'Model name, tool calls, costs, and other message metadata';
+COMMENT ON COLUMN threads.comments IS 'JSONB array of user comments with message and timestamp';
+COMMENT ON COLUMN outfits.is_cached IS 'Flag indicating if this outfit is cached/processed';
 COMMENT ON COLUMN outfit_items.search_results IS 'Product search results with URLs, prices, and thumbnails'; 

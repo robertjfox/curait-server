@@ -13,7 +13,7 @@ from ai.prompts.product_ranking_binary import build_product_ranking_prompt
 from ai.prompts.prompt_suggestions import build_prompt_suggestions_messages
 
 # Schemas
-from ai.schemas.outfits import generate_outfit_schema
+from ai.schemas.outfits import generate_outfit_schema, generate_single_outfit_schema, generate_trend_outfit_analysis_schema
 from ai.schemas.prompt_suggestions import generate_prompt_suggestions_schema
 
 # Streaming/Parsing utils
@@ -28,12 +28,15 @@ from _config.model_config import (
     TITLE_GENERATION,       
     PROMPT_SUGGESTIONS,
     THREAD_RESEARCH,
-    DEEP_TREND_RESEARCH,
     EXPLORE_IDEAS,
+    TREND_OUTFIT_VARIATIONS,        
 )
 
-from ai.prompts.deep_trend_research import build_deep_trend_research_input
-from ai.prompts.explore_ideas import build_explore_ideas_input
+from ai.prompts.explore_ideas import (
+    build_explore_ideas_input,
+    build_trend_outfit_variation_prompt,
+    build_trend_outfit_analysis_messages,
+)
 from ai.schemas.explore_ideas import generate_explore_ideas_schema
 
 logger = logging.getLogger(__name__)
@@ -58,16 +61,18 @@ class OpenAIClient:
     async def generate_outfits_flow(
         self,
         *,
-        queue_multiplier: int,
         user_data: Dict[str, Any],
         conversation_history: List[Dict[str, Any]] = [],
         outfit_history: List[Dict[str, Any]] = [],
+        explore_idea_context: Optional[Dict[str, Any]] = None,
+        trend_outfits_context: Optional[List[Dict[str, Any]]] = None,
         on_outfit_batch: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
         on_single_outfit: Optional[Callable[[Dict[str, Any]], None]] = None,
+        double_batch: bool,
     ) -> None:
         
-        schema = generate_outfit_schema(queue_multiplier)
-        messages = generate_outfit_prompts(user_data, outfit_history, conversation_history, queue_multiplier)
+        schema = generate_outfit_schema(double_batch)
+        messages = generate_outfit_prompts(user_data, outfit_history, conversation_history, double_batch, explore_idea_context, trend_outfits_context)
 
         start_time = time.time()
 
@@ -88,6 +93,83 @@ class OpenAIClient:
         )
 
         return res
+
+    async def generate_trend_outfit_variations(
+        self,
+        *,
+        gender: str,
+        explore_title: str,
+        explore_description: str,
+        base_outfit_items: List[Dict[str, str]],
+        desired_count: int,
+        previous_outfit_variations: List[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Generate additional trend outfit variations aligned with an explore idea."""
+
+        messages = build_trend_outfit_variation_prompt(
+            gender=gender,
+            explore_title=explore_title,
+            explore_description=explore_description,
+            base_outfit_items=base_outfit_items,
+            desired_count=desired_count,
+            previous_outfit_variations=previous_outfit_variations,
+        )
+
+        logger.info(f"[OPENAI] trend outfit variation messages: {messages}")
+
+        schema = generate_outfit_schema(double_batch=False, num_outfits_override=desired_count)
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=TREND_OUTFIT_VARIATIONS["model"],
+                messages=messages,
+                response_format=schema,
+            )
+        except Exception as e:
+            logger.error(f"[OPENAI] trend outfit variation request failed: {e}")
+            return []
+
+        try:
+            content = (response.choices[0].message.content or "").strip()
+            payload = json.loads(content)
+
+            logger.info(f"[OPENAI] trend outfit variation response: {payload}")
+
+            outfits = payload.get("outfits") or []
+            if len(outfits) > desired_count:
+                outfits = outfits[:desired_count]
+            return outfits
+        except Exception as e:
+            logger.error(f"[OPENAI] failed to parse variation response: {e}")
+            return []
+
+    async def analyze_trend_outfit_image(
+        self,
+        *,
+        image_url: str,
+    ) -> Dict[str, Any] | None:
+        """Use GPT vision model to extract outfit data from a reference image."""
+
+        messages = build_trend_outfit_analysis_messages(image_url=image_url)
+        schema = generate_trend_outfit_analysis_schema()
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=TREND_OUTFIT_VARIATIONS["model"],
+                messages=messages,
+                response_format=schema,
+            )
+        except Exception as e:
+            logger.error(f"[OPENAI] trend outfit analysis failed: {e}")
+            return None
+
+        try:
+            content = (response.choices[0].message.content or "").strip()
+            payload = json.loads(content)
+            return payload
+        except Exception as e:
+            logger.error(f"[OPENAI] failed to parse trend outfit analysis: {e}")
+            return None
 
     async def rank_products_flow(
         self,
@@ -296,118 +378,33 @@ class OpenAIClient:
             logger.warning(f"Prompt suggestions failed, falling back: {e}")
             return []
 
-    async def generate_deep_trend_research(
-        self,
-        *,
-        gender: str,
-        date_iso: str,
-    ) -> Dict[str, Any]:
-        """Run deeper, time-aware macro trend research per gender. Returns dict or {text} fallback.
-
-        Uses DEEP_TREND_RESEARCH model. Input kept minimal and explicit.
-        """
-        model_name = DEEP_TREND_RESEARCH["model"]
-        logger.info(f"[DEEP_TREND] start gender={gender} date={date_iso} model={model_name}")
-        try:
-            start_time = time.time()
-
-            # Use Responses API with a single input string (no separate instructions arg)
-            input_text = build_deep_trend_research_input(gender=gender, date_iso=date_iso)
-            response = await self.client.responses.create(
-                model=model_name,
-                input=input_text,
-                tools=[{"type": "web_search_preview"}],
-                top_p=1,
-                # Let the model choose length; remove hard output cap
-            )
-
-            content = (getattr(response, "output_text", "") or "").strip()
-            if not content:
-                # Best-effort extraction for SDK variants
-                try:
-                    output = getattr(response, "output", None)
-                    if output and len(output) > 0:
-                        blocks = getattr(output[0], "content", None)
-                        if blocks and len(blocks) > 0:
-                            text_block = getattr(blocks[0], "text", None)
-                            if text_block is not None:
-                                # text_block may be a simple string, object with .value, or dict
-                                if isinstance(text_block, str):
-                                    content = text_block.strip()
-                                else:
-                                    value = getattr(text_block, "value", None)
-                                    if value is None and isinstance(text_block, dict):
-                                        value = text_block.get("value")
-                                    if value is not None:
-                                        content = str(value).strip()
-                                    else:
-                                        content = str(text_block).strip()
-                except Exception:
-                    pass
-
-            elapsed = (time.time() - start_time) * 1000
-            logger.info(f"[DEEP_TREND] response received ms={int(elapsed)} len={len(content)}")
-            logger.info("[DEEP_TREND] returning text research")
-            return {"text": content}
-        except Exception as e:
-            logger.warning(f"[DEEP_TREND] failed: {e}")
-            return {"text": ""}
-
-    async def generate_explore_ideas(
-        self,
-        *,
-        gender: str,
-        trend_inspiration: str,
-        previous_titles: List[str],
-    ) -> List[Dict[str, str]]:
-        """Return 4 simple ideas: [{title, description}]. Uses Responses API with web search tool if available.
-        """
-        from datetime import date
-        date_iso = date.today().isoformat()
+    async def generate_explore_ideas(self, *, gender: str, outfit_items: List[Dict[str, str]], source_img_url: str = None) -> Dict[str, Any]:
+        """Generate a simple explore idea title and description from outfit items."""
+        from datetime import datetime
         
-        model_name = EXPLORE_IDEAS["model"]
-        logger.info(f"[IDEAS] start gender={gender} date={date_iso} model={model_name} prev_titles={len(previous_titles)}")
+        prompt = build_explore_ideas_input(
+            gender=gender,
+            date_iso=datetime.now().isoformat(),
+            outfit_items=outfit_items,
+            source_img_url=source_img_url,
+        )
 
         try:
-            input_text = build_explore_ideas_input(
-                gender=gender,
-                date_iso=date_iso,
-                trend_inspiration=trend_inspiration,
-                previous_titles=previous_titles,
-            )
-            # Prefer structured output via chat.completions with response_format
-            schema = generate_explore_ideas_schema()
+            # Handle both string and list formats for messages
+            messages = [{"role": "user", "content": prompt}] if isinstance(prompt, str) else prompt
 
-            logger.info(f"[IDEAS] input_text: {input_text}")
-            
             response = await self.client.chat.completions.create(
-                model=model_name,
-                messages=[{"role": "user", "content": input_text}],
-                response_format=schema,
-                top_p=1,
+                model=EXPLORE_IDEAS["model"],
+                messages=messages,
+                response_format=generate_explore_ideas_schema(),
             )
-
+            
             content = (response.choices[0].message.content or "").strip()
-            ideas: List[Dict[str, str]] = []
-            try:
-                parsed = json.loads(content)
-                payload = parsed.get("ideas") if isinstance(parsed, dict) else None
-                if isinstance(payload, list):
-                    for item in payload:
-                        if isinstance(item, dict):
-                            ideas.append({
-                                "title": str(item.get("title", "")).strip(),
-                                "description": str(item.get("description", "")).strip(),
-                                "concept_outfits": item.get("concept_outfits", {}),
-                            })
-            except Exception:
-                pass
-
-            return ideas[:4]
+            return json.loads(content) or None
+            
         except Exception as e:
-            logger.warning(f"[IDEAS] failed: {e}")
-            return []
-
+            logger.warning(f"[EXPLORE_IDEA] failed to generate explore ideas: {e}")
+            return None
 
 def get_openai_client() -> OpenAIClient:
     """Get an OpenAI client instance."""

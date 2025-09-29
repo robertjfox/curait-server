@@ -7,7 +7,7 @@ This directory contains SQL migration files for the AI Stylist database schema.
 The database uses a **thread-based conversational architecture** similar to ChatGPT:
 
 ```
-Users (1) ──→ (N) Threads (1) ──→ (N) Messages (1) ──→ (N) Outfits (1) ──→ (N) Outfit_Items
+Users (1) ──→ (N) Threads (N) ──→ (N) Outfits (1) ──→ (N) Outfit_Items
 ```
 
 ## Tables
@@ -20,17 +20,12 @@ Users (1) ──→ (N) Threads (1) ──→ (N) Messages (1) ──→ (N) Out
 ### **threads**
 
 - Conversation threads for ChatGPT-style interactions
-- Each thread maintains evolving conversation state
-
-### **messages**
-
-- Individual conversation turns (user/assistant/system)
-- Links to generated outfits when assistant provides styling
+- Each thread maintains evolving conversation state and user comments as JSONB
 
 ### **outfits**
 
 - AI-generated styling recommendations
-- Linked to the assistant message that created them
+- Linked to threads
 
 ### **outfit_items**
 

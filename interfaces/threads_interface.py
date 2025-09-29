@@ -16,14 +16,30 @@ class ThreadsInterface:
     def create(
         self,
         user_id: str,
+        explore_idea_id: Optional[str] = None,
     ) -> Optional[str]:
         """Create a new thread and return its ID."""
         payload: Dict[str, Any] = {
             "user_id": user_id,
         }
+
+        if explore_idea_id:
+            payload["explore_idea_id"] = explore_idea_id
+            # If we have an explore_idea_id, fetch the title from the explore idea
+            explore_idea = self._get_explore_idea_by_id(explore_idea_id)
+            if explore_idea:
+                payload["title"] = explore_idea.get("title", "Explore Idea Thread")
         try:
             res = self._supabase.table(self._table).insert(payload).execute()
             return res.data[0]["id"] if res and res.data else None
+        except Exception:
+            return None
+
+    def _get_explore_idea_by_id(self, explore_idea_id: str) -> Optional[Dict[str, Any]]:
+        """Get an explore idea by ID."""
+        try:
+            res = self._supabase.table("explore_ideas").select("*").eq("id", explore_idea_id).single().execute()
+            return res.data
         except Exception:
             return None
 
@@ -66,31 +82,6 @@ class ThreadsInterface:
             logger.error(f"Failed to update thread research: {e}")
             return False
 
-    def update_thread_outfits_with_no_message_id(self, thread_id: str, message_id: str, queue_pull_count: int) -> bool:
-        """Get the oldest outfits for a thread id that have no message id and give them the message id, limited by queue_pull_count."""
-        try:
-            # First get the IDs of outfits to update, then update them
-            outfits_to_update = self._supabase.table("outfits").select("id").eq("thread_id", thread_id).filter("message_id", "is", "null").order("created_at", desc=False).limit(queue_pull_count).execute()
-            if outfits_to_update.data:
-                outfit_ids = [outfit["id"] for outfit in outfits_to_update.data]
-                # Update the selected outfits
-                res = self._supabase.table("outfits").update({"message_id": message_id}).in_("id", outfit_ids).execute()
-                return True
-            else:
-                logger.info(f"No outfits found to update for thread {thread_id}")
-                return True
-        except Exception as e:
-            logger.error(f"Failed to update outfits: {e}")
-            return False
-        
-    def delete_thread_outfits_with_no_message_id(self, thread_id: str) -> bool:
-        """Delete all outfits for a thread id that have no message id."""
-        try:
-            self._supabase.table("outfits").delete().eq("thread_id", thread_id).filter("message_id", "is", "null").execute()
-            return True
-        except Exception:
-            return False
-
     def list_recent_by_user(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Return the most recent threads for a user, newest first."""
         try:
@@ -104,6 +95,57 @@ class ThreadsInterface:
                     .execute()
             )
             return res.data or []
+        except Exception:
+            return []
+
+    def add_comment(self, thread_id: str, message: str) -> bool:
+        """Add a user comment to the thread's comments JSONB field."""
+        try:
+            # Get current comments
+            thread = self.get(thread_id)
+            if not thread:
+                return False
+
+            current_comments = thread.get("comments") or []
+
+            # Add new comment with timestamp
+            new_comment = {
+                "message": message,
+                "timestamp": datetime.now().isoformat()
+            }
+            current_comments.append(new_comment)
+
+            # Update the thread
+            self._supabase.table(self._table).update({
+                "comments": current_comments
+            }).eq("id", thread_id).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to add comment to thread {thread_id}: {e}")
+            return False
+
+    def get_comments(self, thread_id: str) -> List[Dict[str, Any]]:
+        """Get all comments for a thread."""
+        try:
+            thread = self.get(thread_id)
+            comments = thread.get("comments") if thread else None
+            return comments if comments is not None else []
+        except Exception:
+            return []
+
+    def get_conversation_history(self, thread_id: str) -> List[Dict[str, str]]:
+        """Get conversation history from comments in OpenAI chat format."""
+        try:
+            comments = self.get_comments(thread_id)
+            history = []
+
+            for comment in comments:
+                history.append({
+                    "role": "user",
+                    "content": comment.get("message", "")
+                })
+
+            return history
         except Exception:
             return []
 

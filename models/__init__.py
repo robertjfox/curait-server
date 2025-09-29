@@ -4,11 +4,9 @@ from .users import UserBase, UserCreate, UserUpdate, User
 # Thread models
 from .threads import ThreadBase, ThreadCreate, ThreadUpdate, Thread, ThreadSummary
 
-# Message models
-from .messages import (
-    MessageBase, MessageCreate, MessageUpdate, Message, 
-    MessageWithOutfits, ConversationMessage, MessageRole
-)
+# Outfit models
+from .outfits import OutfitBase, OutfitCreate, OutfitUpdate, Outfit
+
 
 # Shopping models  
 from .shopping import SearchResultItem
@@ -35,11 +33,10 @@ __all__ = [
     
     # Thread models
     "ThreadBase", "ThreadCreate", "ThreadUpdate", "Thread", "ThreadSummary",
-    
-    # Message models
-    "MessageBase", "MessageCreate", "MessageUpdate", "Message", 
-    "MessageWithOutfits", "ConversationMessage", "MessageRole",
-    
+
+    # Outfit models
+    "OutfitBase", "OutfitCreate", "OutfitUpdate", "Outfit",
+
     # Shopping models
     "SearchResultItem",
     

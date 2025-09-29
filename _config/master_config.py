@@ -14,7 +14,6 @@ CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 
 
 NUM_OUTFITS_IN_GRID = int(os.getenv("NUM_OUTFITS_IN_GRID", "3"))
-QUEUE_MULTIPLIER = int(os.getenv("QUEUE_MULTIPLIER", "2"))
 
 # Shopping Configuration
 SHOPPING_MIN_PRICE = int(os.getenv("SHOPPING_MIN_PRICE", "40"))
