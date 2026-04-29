@@ -82,7 +82,7 @@ class OutfitGenerationService:
 			if config.PRODUCT_RANKING_ENABLED:
 				ranked_results, ratings = await self.ranking_service.rank_results(
 					user_data=user_data,
-					item_context={"keywords": keywords},
+					item_context={"keywords": keywords, "item_id": item_id},
 					results=unranked_results,
 					outfit_row=outfit_row,
 				)
@@ -103,6 +103,43 @@ class OutfitGenerationService:
 			raise
 		except Exception as e:
 			logger.error(f"Failed to process item with keywords '{keywords}': {e}")
+
+	async def _process_items_with_limit(
+		self,
+		*,
+		items: List[Dict[str, Any]],
+		user_data: Dict[str, Any],
+		outfit_row: Dict[str, Any],
+	) -> Dict[str, Any]:
+		"""Search/rank outfit items without overwhelming local network resources."""
+		limit = max(1, int(getattr(config, "ITEM_PROCESSING_CONCURRENCY", 1)))
+		semaphore = asyncio.Semaphore(limit)
+
+		async def run_item(item: Dict[str, Any]) -> None:
+			item_id = item.get("id")
+			keywords = (item.get("keywords") or "").strip()
+			if not item_id or not keywords:
+				return
+
+			async with semaphore:
+				await self._process_single_item(
+					item_id=item_id,
+					keywords=keywords,
+					user_data=user_data,
+					outfit_row=outfit_row,
+				)
+
+		tasks = [asyncio.create_task(run_item(item)) for item in items]
+		if not tasks:
+			return {"success": True, "items_processed": 0}
+
+		results = await asyncio.gather(*tasks, return_exceptions=True)
+		errors = sum(1 for result in results if isinstance(result, Exception))
+		return {
+			"success": errors == 0,
+			"items_processed": len(tasks),
+			"errors": errors,
+		}
 
 	async def _process_single_outfit(
 		self,
@@ -176,32 +213,11 @@ class OutfitGenerationService:
 		if not items:
 			return {"success": True, "items_processed": 0}
 
-		# Build tasks for items that have keywords
-		tasks: List[asyncio.Task] = []
-		for item in items:
-			item_id = item.get("id")
-			keywords = (item.get("keywords") or "").strip()
-			if not item_id or not keywords:
-				continue
-			tasks.append(asyncio.create_task(self._process_single_item(
-				item_id=item_id,
-				keywords=keywords,
-				user_data=user_data,
-				outfit_row=outfit_row,
-			)))
-
-		if not tasks:
-			return {"success": True, "items_processed": 0}
-
-		# Execute in parallel
-		results = await asyncio.gather(*tasks, return_exceptions=True)
-
-		errors = sum(1 for r in results if isinstance(r, Exception))
-		return {
-			"success": errors == 0,
-			"items_processed": len(tasks),
-			"errors": errors,
-		}
+		return await self._process_items_with_limit(
+			items=items,
+			user_data=user_data,
+			outfit_row=outfit_row,
+		)
 
 	async def _search_and_rank_item_ids(
 		self,
@@ -220,29 +236,11 @@ class OutfitGenerationService:
 			for item in self.outfit_items_interface.get_by_outfit(outfit_id)
 			if item.get("id") in item_id_set
 		]
-		tasks: List[asyncio.Task] = []
-		for item in items:
-			item_id = item.get("id")
-			keywords = (item.get("keywords") or "").strip()
-			if not item_id or not keywords:
-				continue
-			tasks.append(asyncio.create_task(self._process_single_item(
-				item_id=item_id,
-				keywords=keywords,
-				user_data=user_data,
-				outfit_row=outfit_row,
-			)))
-
-		if not tasks:
-			return {"success": True, "items_processed": 0}
-
-		results = await asyncio.gather(*tasks, return_exceptions=True)
-		errors = sum(1 for r in results if isinstance(r, Exception))
-		return {
-			"success": errors == 0,
-			"items_processed": len(tasks),
-			"errors": errors,
-		}
+		return await self._process_items_with_limit(
+			items=items,
+			user_data=user_data,
+			outfit_row=outfit_row,
+		)
 
 	async def remix_outfit(self, *, outfit_id: str, feedback: str) -> Dict[str, Any]:
 		feedback = (feedback or "").strip()

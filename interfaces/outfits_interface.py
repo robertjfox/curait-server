@@ -117,6 +117,41 @@ class OutfitsInterface:
         except Exception:
             return False
 
+    def set_saved(self, outfit_id: str, saved: bool) -> Optional[Dict[str, Any]]:
+        """Set the saved flag for an outfit and return the updated row."""
+        try:
+            res = (
+                self._supabase
+                .table(self._table)
+                .update({"saved": saved})
+                .eq("id", outfit_id)
+                .execute()
+            )
+            return res.data[0] if res.data else None
+        except Exception as e:
+            logger.error(f"Failed to update saved state for outfit {outfit_id}: {e}")
+            return None
+
+    def list_saved_for_user(self, user_id: str) -> List[Dict[str, Any]]:
+        """Return all saved outfits for a user, including products."""
+        try:
+            res = (
+                self._supabase
+                .table(self._table)
+                .select("*, outfit_items (*), threads!inner(user_id)")
+                .eq("threads.user_id", user_id)
+                .eq("saved", True)
+                .order("updated_at", desc=True)
+                .execute()
+            )
+            outfits = res.data or []
+            for outfit in outfits:
+                outfit.pop("threads", None)
+            return outfits
+        except Exception as e:
+            logger.error(f"Failed to list saved outfits for user {user_id}: {e}")
+            return []
+
     def get_next_cached_for_thread(self, thread_id: str) -> Optional[Dict[str, Any]]:
         """Return the oldest cached outfit for a thread."""
         try:

@@ -2,6 +2,7 @@ import asyncio
 from typing import Any, Dict, List, Optional, TypeVar
 import httpx
 import re
+import _config
 
 import logging
 
@@ -44,7 +45,10 @@ def create_async_httpx_client(timeout_seconds: float = 15.0) -> httpx.AsyncClien
             write=min(5.0, timeout_seconds),
             pool=min(3.0, timeout_seconds),
         ),
-        limits=httpx.Limits(max_connections=50, max_keepalive_connections=10),
+        limits=httpx.Limits(
+            max_connections=_config.SEARCH_HTTP_MAX_CONNECTIONS,
+            max_keepalive_connections=_config.SEARCH_HTTP_MAX_KEEPALIVE_CONNECTIONS,
+        ),
     )
 
 

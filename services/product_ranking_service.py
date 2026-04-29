@@ -2,8 +2,10 @@ import logging
 import asyncio
 from typing import Any, Dict, List, Tuple
 import time
+from uuid import uuid4
 
 from clients.openai_client import get_openai_client
+from clients.supabase_client import get_supabase_client
 import _config
 from utils.image_processing.create_image_grid import create_product_grid
 import base64
@@ -14,7 +16,34 @@ logger = logging.getLogger(__name__)
 class ProductRankingService:
     def __init__(self):
         self.openai_client = get_openai_client()
+        self.supabase = get_supabase_client()
         self._ranking_semaphore = asyncio.Semaphore(_config.RANKING_BATCH_SIZE)
+
+    def _upload_ranking_grid(
+        self,
+        *,
+        image_bytes: bytes,
+        outfit_row: Dict[str, Any],
+        item_context: Dict[str, Any],
+    ) -> str | None:
+        """Persist ranking grid images for audit/debugging without blocking ranking."""
+        if not _config.PRODUCT_RANKING_GRID_UPLOAD_ENABLED:
+            return None
+
+        try:
+            outfit_id = outfit_row.get("id") or "unknown-outfit"
+            item_id = item_context.get("item_id") or "unknown-item"
+            filename = f"{outfit_id}/{item_id}/{int(time.time() * 1000)}-{uuid4().hex}.jpg"
+            bucket = "product-ranking-grids"
+            self.supabase.storage.from_(bucket).upload(
+                filename,
+                image_bytes,
+                {"content-type": "image/jpeg"},
+            )
+            return self.supabase.storage.from_(bucket).get_public_url(filename)
+        except Exception as exc:
+            logger.warning("Failed to upload product ranking grid: %s", exc)
+            return None
 
     async def rank_results(
         self,
@@ -42,22 +71,30 @@ class ProductRankingService:
                     fallback_ratings = [5] * len(fallback_results)  # Default rating of 5
                     return fallback_results, fallback_ratings
                 
-                # Use the actual number of products with images for consistency
-                n = len(products_with_images)
+                # The grid, prompt metadata, expected ratings, and ranked products
+                # must all refer to this exact slice.
+                grid_cap = max(1, int(getattr(_config, "RANKING_IMAGE_MAX_PRODUCTS", cap)))
+                ranking_candidates = products_with_images[:grid_cap]
+                n = len(ranking_candidates)
                 
                 try:
                     # Extract keywords from item_context for the header
                     ranking_keywords = item_context.get("keywords") if item_context else None
                     img_bytes = await create_product_grid(
-                        products_with_images,
+                        ranking_candidates,
                         ranking_keywords=ranking_keywords,
+                    )
+                    ranking_grid_url = self._upload_ranking_grid(
+                        image_bytes=img_bytes,
+                        outfit_row=outfit_row,
+                        item_context=item_context,
                     )
                     grid_data_uri = f"data:image/jpeg;base64,{base64.b64encode(img_bytes).decode('ascii')}"
 
                 except Exception as grid_err:
                     logger.error(f"🖼️ GRID CREATION FAILED: {grid_err}")
                     # Fallback: return products with images unchanged with default ratings
-                    fallback_results = products_with_images[:top_k]
+                    fallback_results = ranking_candidates[:top_k]
                     fallback_ratings = [5] * len(fallback_results)
                     return fallback_results, fallback_ratings
 
@@ -65,7 +102,7 @@ class ProductRankingService:
                     ratings = await self.openai_client.rank_products_flow(
                         user_data=user_data,    
                         item_context=item_context,
-                        products=products_with_images,
+                        products=ranking_candidates,
                         num_results=n,
                         grid_image_data_uri=grid_data_uri,
                         outfit_row=outfit_row,
@@ -74,7 +111,13 @@ class ProductRankingService:
                 except Exception as ranking_err:
                     logger.warning(f"Failed to rank products: {ranking_err}")
                     # Fallback: return products with images unchanged with default ratings
-                    fallback_results = products_with_images[:top_k]
+                    fallback_results = [
+                        {
+                            **product,
+                            "ranking_grid_url": ranking_grid_url,
+                        }
+                        for product in ranking_candidates[:top_k]
+                    ]
                     fallback_ratings = [5] * len(fallback_results)
                     return fallback_results, fallback_ratings
 
@@ -83,9 +126,10 @@ class ProductRankingService:
                 sorted_indices = sorted(range(n), key=lambda i: (-ratings[i], i))
                 ranked_all: List[Dict[str, Any]] = []
                 for idx in sorted_indices:
-                    product = products_with_images[idx].copy()
+                    product = ranking_candidates[idx].copy()
                     product["ranking"] = ratings[idx]
                     product["original_index"] = idx
+                    product["ranking_grid_url"] = ranking_grid_url
                     ranked_all.append(product)
                 final_ranked = ranked_all[:top_k]
 

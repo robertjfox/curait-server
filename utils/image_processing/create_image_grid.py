@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 from PIL import Image, ImageDraw, ImageFont
+import _config
 
 
 logger = logging.getLogger(__name__)
@@ -261,13 +262,31 @@ async def create_product_grid(
         draw.text((x1, start_y), line1, fill=(0, 0, 0), font=header_font)
         draw.text((x2, start_y + text_h1 + 6), line2, fill=(0, 0, 0), font=sub_font)
 
-    # Download all images in parallel with reduced timeout
-    async with httpx.AsyncClient(timeout=5.0) as shared_client:  # Reduced timeout from 10s
+    # Download images with bounded concurrency; local safe mode keeps this
+    # serialized to avoid overwhelming home Wi-Fi/router connection tracking.
+    download_limit = max(1, int(getattr(_config, "RANKING_IMAGE_DOWNLOAD_CONCURRENCY", 8)))
+    download_semaphore = asyncio.Semaphore(download_limit)
+
+    async def load_product_image(product: dict) -> Optional[Image.Image]:
+        image_url = product.get("imageUrl")
+        if not image_url:
+            return None
+
+        async with download_semaphore:
+            return await _load_image_with_client(shared_client, image_url)
+
+    async with httpx.AsyncClient(
+        timeout=5.0,
+        limits=httpx.Limits(
+            max_connections=download_limit,
+            max_keepalive_connections=download_limit,
+        ),
+    ) as shared_client:
         download_tasks = []
-        for i, product in enumerate(products):
+        for product in products:
             image_url = product.get("imageUrl")
             if image_url:
-                download_tasks.append(_load_image_with_client(shared_client, image_url))
+                download_tasks.append(load_product_image(product))
             else:
                 download_tasks.append(asyncio.create_task(asyncio.sleep(0, result=None)))
         

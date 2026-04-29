@@ -3,15 +3,47 @@ import logging
 from pydantic import BaseModel
 
 from services.outfit_generation_service import OutfitGenerationService
+from interfaces.outfits_interface import OutfitsInterface
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/outfits", tags=["outfits"])
 
 service = OutfitGenerationService()
+outfits_interface = OutfitsInterface()
 
 
 class RemixOutfitRequest(BaseModel):
     feedback: str
+
+
+class SavedOutfitRequest(BaseModel):
+    saved: bool
+
+
+@router.get("/saved/by-user/{user_id}", response_model=dict)
+async def list_saved_outfits(user_id: str):
+    try:
+        return {
+            "success": True,
+            "outfits": outfits_interface.list_saved_for_user(user_id),
+        }
+    except Exception as e:
+        logger.error(f"❌ Error listing saved outfits for user {user_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to list saved outfits")
+
+
+@router.patch("/{outfit_id}/saved", response_model=dict)
+async def set_outfit_saved(outfit_id: str, request: SavedOutfitRequest):
+    try:
+        outfit = outfits_interface.set_saved(outfit_id, request.saved)
+        if not outfit:
+            raise HTTPException(status_code=404, detail="Outfit not found")
+        return {"success": True, "outfit": outfit}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error updating saved state for outfit {outfit_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to update saved state")
 
 @router.post("/{outfit_id}/search-and-rank", response_model=dict)
 async def search_and_rank_outfit(outfit_id: str):

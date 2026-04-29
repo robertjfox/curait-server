@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS outfits (
     description TEXT,
     outfit_order INTEGER DEFAULT 0,
     is_cached BOOLEAN DEFAULT FALSE,
+    saved BOOLEAN DEFAULT FALSE,
     feedback TEXT,
     vton_image_url TEXT,
     default_rendering_url TEXT,
@@ -75,11 +76,13 @@ CREATE TABLE IF NOT EXISTS outfits (
 );
 
 COMMENT ON COLUMN outfits.is_cached IS 'Pre-generated outfit held in reserve for the next regeneration.';
+COMMENT ON COLUMN outfits.saved IS 'User-saved look shown in the saved looks gallery.';
 COMMENT ON COLUMN outfits.vton_image_url IS 'Virtual try-on image rendered onto the user avatar.';
 COMMENT ON COLUMN outfits.default_rendering_url IS 'AI-generated flatlay image of the outfit.';
 
 CREATE INDEX IF NOT EXISTS idx_outfits_thread_id ON outfits(thread_id);
 CREATE INDEX IF NOT EXISTS idx_outfits_is_cached ON outfits(is_cached);
+CREATE INDEX IF NOT EXISTS idx_outfits_saved ON outfits(saved);
 CREATE INDEX IF NOT EXISTS idx_outfits_order ON outfits(outfit_order);
 
 -- ---------------------------------------------------------------------------
