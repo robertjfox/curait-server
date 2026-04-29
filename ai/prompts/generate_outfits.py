@@ -3,7 +3,6 @@ from typing import Dict, Any, List, Tuple
 from utils.outfit_utils import format_outfit_history
 import _config as config
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +20,19 @@ def generate_outfit_system_prompt(user_gender: str = None) -> str:
         "You are an expert fashion stylist returning ONLY a structured function call.\n"
         "Goal: brainstorm shoppable, realistic outfits that feel fresh and wearable.\n\n"
 
+        "PRIORITY RULES:\n"
+        "- The user's latest request is the primary source of truth. User profile, brands, and style references are secondary.\n"
+        "- Never ignore the stated activity, occasion, dress code, or setting in the latest request.\n"
+        "- If brand/style context conflicts with the latest request, adapt the style context to the request instead of overriding it.\n"
+        "- For athletic or active requests (run club, gym, workout, hike, sport), create functional athletic outfits with appropriate performance pieces and footwear. Do not style them as casual cafe, office, or smart casual looks unless explicitly asked.\n\n"
+
         "COMPOSITION RULES:\n"
         f"- 3-5 items per outfit.\n"
         f"- Each item.type ∈ [{', '.join(config.CLOTHING_ITEMS)}]; no duplicate roles per outfit.\n"
         "- Practical combos only (e.g., no blazer+shorts; no dress+skirt together; no shorts with winter coat).\n"
         "- Cohesive palette and sensible layering for the weather.\n\n"
-        "- Max 1 accessory per outfit. Accessories should be belts, glasses, bags, etc. Nothing uncommon.\n"
+        "- Do not include hats, bags, jewelry, glasses, belts, or other accessories for now.\n"
+        "- Focus on main clothing items and shoes.\n\n"
 
         "GENDER RULES:\n"
         f"- User gender='{gender_label}'. All items must suit this gender.\n"
@@ -50,27 +56,27 @@ def generate_outfit_user_prompt(
     conversation_history: List[Dict[str, Any]],
     formatted_outfit_history: str,
     num_outfits: int,
-    explore_idea_context: Optional[Dict[str, Any]] = None,
-    trend_outfits_context: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     
     safe_user: Dict[str, Any] = user_data or {}
-    # all we care about is age and location
     safe_user = {k: v for k, v in safe_user.items() if k in ["age", "location"]}
     ctx: Dict[str, Any] = user_data.get("context") or {}
     j = lambda o: json.dumps(o or {}, separators=(",", ":"))
 
-    return (
-        f"Create {num_outfits} distinct, complete outfit(s) using the structured function.\n"
-        f"- Try to keep everything within the EXPLORE IDEA CONTEXT.\n"
-        f"- If the OUTFIT HISTORY is empty, use the EXACT TREND OUTFIT EXAMPLES.\n\n"
+    latest_user_request = ""
+    for message in reversed(conversation_history or []):
+        if message.get("role") == "user" and message.get("content"):
+            latest_user_request = message["content"]
+            break
 
-        + (f"EXPLORE_IDEA_CONTEXT:\n{j(explore_idea_context)}\n\n" if explore_idea_context else "")
+    return (
+        f"Create {num_outfits} distinct, complete outfit(s) using the structured function.\n\n"
+        + f"LATEST_USER_REQUEST:\n{latest_user_request}\n\n"
+        + "Treat LATEST_USER_REQUEST as mandatory. USER_CONTEXT is only preference guidance.\n\n"
         + f"USER_PROFILE:\n{j(safe_user)}\n\n"
         + f"USER_CONTEXT:\n{j(ctx)}\n\n"
         + f"OUTFIT_HISTORY:\n{formatted_outfit_history}\n\n"
         + ("CONVERSATION_HISTORY:\n" + j(conversation_history) + "\n\n" if conversation_history else "")
-        + (f"TREND OUTFIT EXAMPLES:\n{j(trend_outfits_context)}\n\n" if trend_outfits_context else "")
     )
 
 
@@ -79,8 +85,6 @@ def generate_outfit_prompts(
     outfit_history: List[Dict[str, Any]],
     conversation_history: List[Dict[str, Any]],
     double_batch: bool,
-    explore_idea_context: Optional[Dict[str, Any]] = None,
-    trend_outfits_context: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[str, str]:
     
     user_gender = (user_data or {}).get("gender")
@@ -94,8 +98,6 @@ def generate_outfit_prompts(
         conversation_history,
         formatted_outfit_history,
         num_outfits,
-        explore_idea_context,
-        trend_outfits_context,
     )
 
     logger.info(f"[OPENAI] user prompt: {user_prompt}")

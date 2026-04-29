@@ -1,17 +1,13 @@
 import io
 import math
-import time
-import uuid
 import logging
 import asyncio
+import base64
 from typing import List, Tuple, Optional, Dict, Any
 from concurrent.futures import ThreadPoolExecutor
 
-import requests
 import httpx
 from PIL import Image, ImageDraw, ImageFont
-
-from clients.supabase_client import get_supabase_client
 
 
 logger = logging.getLogger(__name__)
@@ -42,16 +38,28 @@ def _get_cached_font(size: int, bold: bool = False) -> Any:
                 _font_cache[cache_key] = ImageFont.load_default()
     return _font_cache[cache_key]
 
-async def _download_image_with_client(client: httpx.AsyncClient, url: str) -> Optional[Image.Image]:
-    """Download image using a shared client to avoid resource leaks."""
+async def _load_image_with_client(client: httpx.AsyncClient, url: str) -> Optional[Image.Image]:
+    """Load an image from an HTTP URL or data URI."""
     try:
-        resp = await client.get(url)
+        if url.startswith("data:image/"):
+            _, encoded = url.split(",", 1)
+            img = Image.open(io.BytesIO(base64.b64decode(encoded)))
+            return img.convert("RGB")
+
+        resp = await client.get(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            },
+            follow_redirects=True,
+        )
         resp.raise_for_status()
         img = Image.open(io.BytesIO(resp.content))
         img = img.convert("RGB")
         return img
     except Exception as e:
-        logger.warning(f"Failed to download image")
+        logger.debug(f"Failed to download image {url}: {e}")
         return None
 
 def _fit_into_cell(img: Image.Image, cell_size: Tuple[int, int], max_fill: bool = True) -> Image.Image:
@@ -141,15 +149,28 @@ def _process_single_image(args: Tuple[Any, int, int, int, int, str, str, str]) -
     """Process a single image in a thread for parallel processing."""
     try:
         img, cell_w, cell_h, image_area_h, label, title, source, price = args
-        if img is None or isinstance(img, Exception):
-            return None
-            
         # Create the full cell canvas (white)
         cell_img = Image.new("RGB", (cell_w, cell_h), (255, 255, 255))
 
-        # Fit product image into the middle image area and paste it
-        fitted_img = _fit_into_cell(img, (cell_w, image_area_h))
-        cell_img.paste(fitted_img, (0, METADATA_TOP_HEIGHT))
+        if img is not None and not isinstance(img, Exception):
+            # Fit product image into the middle image area and paste it
+            fitted_img = _fit_into_cell(img, (cell_w, image_area_h))
+            cell_img.paste(fitted_img, (0, METADATA_TOP_HEIGHT))
+        else:
+            draw = ImageDraw.Draw(cell_img)
+            draw.rectangle(
+                [0, METADATA_TOP_HEIGHT, cell_w, METADATA_TOP_HEIGHT + image_area_h],
+                fill=(242, 242, 242),
+            )
+            placeholder_font = _get_cached_font(12, bold=True)
+            label_text = "IMAGE FAILED"
+            bbox = draw.textbbox((0, 0), label_text, font=placeholder_font)
+            draw.text(
+                ((cell_w - (bbox[2] - bbox[0])) // 2, METADATA_TOP_HEIGHT + image_area_h // 2),
+                label_text,
+                fill=(120, 120, 120),
+                font=placeholder_font,
+            )
         
         # Add source metadata - centered and larger
         _draw_product_title(cell_img, title, source, (cell_w, cell_h))
@@ -162,7 +183,7 @@ def _process_single_image(args: Tuple[Any, int, int, int, int, str, str, str]) -
         logger.warning(f"Failed to process image: {e}")
         return None
 
-async def create_product_grid_and_upload(
+async def create_product_grid(
     products: List[dict],
     index_labels: Optional[List[int]] = None,
     *,
@@ -170,13 +191,11 @@ async def create_product_grid_and_upload(
     cell_size: Tuple[int, int] = (160, 160),  # Reduced from (256, 256)
     padding: int = 4,  # Reduced from 8
     background_color: Tuple[int, int, int] = (255, 255, 255),
-    bucket: str = "product-ranking-grids",
-    filename_prefix: str = "product_grid",
     ranking_keywords: Optional[str] = None,
-) -> Tuple[bytes, Optional[str], str]:
+) -> bytes:
     """
     OPTIMIZED: Create a composite grid image from given product data with minimal metadata
-    and upload to Supabase storage. Returns (png_bytes, public_url_or_none, filename).
+    for product ranking. Returns JPEG bytes for direct model input.
 
     Performance optimizations:
     - Smaller cell size (160x160 vs 256x256)
@@ -248,7 +267,7 @@ async def create_product_grid_and_upload(
         for i, product in enumerate(products):
             image_url = product.get("imageUrl")
             if image_url:
-                download_tasks.append(_download_image_with_client(shared_client, image_url))
+                download_tasks.append(_load_image_with_client(shared_client, image_url))
             else:
                 download_tasks.append(asyncio.create_task(asyncio.sleep(0, result=None)))
         
@@ -285,24 +304,4 @@ async def create_product_grid_and_upload(
     # Encode to JPEG bytes with lower quality for smaller size
     out = io.BytesIO()
     grid.save(out, format="JPEG", quality=70, optimize=True)  # Reduced quality from 85
-    img_bytes = out.getvalue()
-
-    # Upload to Supabase
-    public_url: Optional[str] = None
-    filename = f"{filename_prefix}_{int(time.time())}_{uuid.uuid4().hex}.jpg"
-    
-    try:
-        supabase = get_supabase_client()
-        supabase.storage.from_(bucket).upload(
-            path=filename,
-            file=img_bytes,
-            file_options={"content-type": "image/jpeg"},
-        )
-        
-        public_url = supabase.storage.from_(bucket).get_public_url(filename)
-
-    except Exception as e:
-        logger.error(f"Failed to upload grid to bucket '{bucket}': {e}")
-        public_url = None  # Ensure public_url is explicitly set to None on failure
-
-    return img_bytes, public_url, filename 
+    return out.getvalue()

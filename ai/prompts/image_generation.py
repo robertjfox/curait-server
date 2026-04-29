@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Optional
 
 
 # Toggle for background rendering in flatlay images
-USE_CONTEXTUAL_BACKGROUNDS = False
+USE_CONTEXTUAL_BACKGROUNDS = True
 
 
 def create_flatlay_prompt(outfits: List[Dict[str, Any]]) -> str:
@@ -20,6 +20,12 @@ def create_flatlay_prompt(outfits: List[Dict[str, Any]]) -> str:
     else:
         background_instruction = "Use a clean, all white background for each outfit."
     
+    separator_instruction = (
+        "Keep a bold red line between each cell."
+        if len(outfits) > 1
+        else "Do not include any red divider line or cell separator."
+    )
+
     # Combine all outfits into a single prompt
     combined_prompt = f"""
     Dress the avatars in the following outfits from left to right.
@@ -28,7 +34,7 @@ def create_flatlay_prompt(outfits: List[Dict[str, Any]]) -> str:
     You may slightly change the body positioning to give a bit of movement, like in a model photoshoot.
     The vibe of the clothing should be realistic and trendy, like a pinterest post. Think FASHION.
     The user should be looking directly at the camera. KEEP A HIGH FIDELITY OF THE USER'S FACE. CLOSED MOUTH. MODEL GAZE.
-    Keep a bold red line between each cell.
+    {separator_instruction}
     NEVER include any text in the image.
     """
     

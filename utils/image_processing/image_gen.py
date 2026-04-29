@@ -23,26 +23,20 @@ def to_pil_image(img_input: Union[bytes, str, Image.Image]) -> Image.Image:
         raise ValueError(f"Unsupported image input type: {type(img_input)}")
 
 
-def load_user_avatar_from_url(avatar_url: str) -> Image.Image:
-    """
-    Load user avatar image from Supabase URL.
-    
-    Args:
-        avatar_url: URL to user avatar image from Supabase
-        
-    Returns:
-        PIL Image object
-        
-    Raises:
-        Exception if image cannot be loaded from URL
+def load_user_avatar_from_url(avatar_url: str) -> Optional[Image.Image]:
+    """Fetch a user's avatar image; returns None if unavailable.
+
+    Guest users (and anyone who hasn't uploaded a selfie) will not have an
+    avatar, so this is an expected soft-failure path. Callers should handle
+    None by falling back to text-only generation.
     """
     try:
         response = requests.get(avatar_url, timeout=10)
         response.raise_for_status()
         return Image.open(BytesIO(response.content))
     except Exception as e:
-        logger.error(f"🎭 Failed to load avatar from URL {avatar_url}: {e}")
-        raise
+        logger.debug(f"🎭 No avatar available at {avatar_url}: {e}")
+        return None
 
 
 def prepare_pil_for_upload(img: Image.Image) -> Image.Image:

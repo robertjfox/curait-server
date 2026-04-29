@@ -13,18 +13,16 @@ SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 
 
-NUM_OUTFITS_IN_GRID = int(os.getenv("NUM_OUTFITS_IN_GRID", "3"))
+NUM_OUTFITS_IN_GRID = int(os.getenv("NUM_OUTFITS_IN_GRID", "1"))
 
 # Shopping Configuration
-SHOPPING_MIN_PRICE = int(os.getenv("SHOPPING_MIN_PRICE", "40"))
-SHOPPING_MAX_PRICE = int(os.getenv("SHOPPING_MAX_PRICE", "200"))
 SHOPPING_RESULTS_TO_FETCH = int(os.getenv("SHOPPING_RESULTS_TO_FETCH", "40"))
 SHOPPING_RESULTS_TO_RANK = int(os.getenv("SHOPPING_RESULTS_TO_RANK", "20"))
 SHOPPING_RESULTS_TO_RETURN = int(os.getenv("SHOPPING_RESULTS_TO_RETURN", "10"))
 
 
 CLOTHING_ITEMS = [
-   "outerwear",  "tops", "dresses", "bottoms", "footwear", "accessories"
+   "outerwear", "tops", "dresses", "bottoms", "footwear"
 ]
 
 # Product ranking toggle
@@ -32,6 +30,7 @@ PRODUCT_RANKING_ENABLED = os.getenv("PRODUCT_RANKING_ENABLED", "true").lower() i
 
 # Search and ranking performance settings
 SERPER_MAX_CONCURRENCY = int(os.getenv("SERPER_MAX_CONCURRENCY", "15"))  # Increased from default 10
+SHOPPING_SEARCH_TIMEOUT = float(os.getenv("SHOPPING_SEARCH_TIMEOUT", "12.0"))
 RANKING_BATCH_SIZE = int(os.getenv("RANKING_BATCH_SIZE", "12"))  # Process rankings in parallel batches
 RANKING_MAX_RETRIES = int(os.getenv("RANKING_MAX_RETRIES", "1"))  # Number of retries for failed ranking operations
 RANKING_RETRY_DELAY = float(os.getenv("RANKING_RETRY_DELAY", "1.0"))  # Initial delay between retries in seconds

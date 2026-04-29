@@ -16,30 +16,15 @@ class ThreadsInterface:
     def create(
         self,
         user_id: str,
-        explore_idea_id: Optional[str] = None,
     ) -> Optional[str]:
         """Create a new thread and return its ID."""
         payload: Dict[str, Any] = {
             "user_id": user_id,
         }
 
-        if explore_idea_id:
-            payload["explore_idea_id"] = explore_idea_id
-            # If we have an explore_idea_id, fetch the title from the explore idea
-            explore_idea = self._get_explore_idea_by_id(explore_idea_id)
-            if explore_idea:
-                payload["title"] = explore_idea.get("title", "Explore Idea Thread")
         try:
             res = self._supabase.table(self._table).insert(payload).execute()
             return res.data[0]["id"] if res and res.data else None
-        except Exception:
-            return None
-
-    def _get_explore_idea_by_id(self, explore_idea_id: str) -> Optional[Dict[str, Any]]:
-        """Get an explore idea by ID."""
-        try:
-            res = self._supabase.table("explore_ideas").select("*").eq("id", explore_idea_id).single().execute()
-            return res.data
         except Exception:
             return None
 
@@ -61,27 +46,6 @@ class ThreadsInterface:
         except Exception:
             return False
 
-    def update_research(self, thread_id: str, research: Dict[str, Any]) -> bool:
-        """Set thread.research TEXT to provided string (JSON string if dict)."""
-        try:
-            research_text = ""
-            if isinstance(research, str):
-                research_text = research
-            else:
-                try:
-                    import json as _json
-                    research_text = _json.dumps(research)
-                except Exception:
-                    research_text = str(research)
-
-            self._supabase.table(self._table).update({
-                "research": research_text,
-            }).eq("id", thread_id).execute()
-            return True
-        except Exception as e:
-            logger.error(f"Failed to update thread research: {e}")
-            return False
-
     def list_recent_by_user(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Return the most recent threads for a user, newest first."""
         try:
@@ -97,6 +61,31 @@ class ThreadsInterface:
             return res.data or []
         except Exception:
             return []
+
+    def list_summaries_by_user(self, user_id: str) -> List[Dict[str, Any]]:
+        """Return thread summaries (no comments/context) for a user, most-recent first."""
+        try:
+            res = (
+                self._supabase
+                    .table(self._table)
+                    .select("id, user_id, title, created_at, updated_at")
+                    .eq("user_id", user_id)
+                    .order("updated_at", desc=True)
+                    .execute()
+            )
+            return res.data or []
+        except Exception as e:
+            logger.error(f"Failed to list thread summaries: {e}")
+            return []
+
+    def delete(self, thread_id: str) -> bool:
+        """Delete a thread (cascades to outfits/outfit_items)."""
+        try:
+            self._supabase.table(self._table).delete().eq("id", thread_id).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete thread {thread_id}: {e}")
+            return False
 
     def add_comment(self, thread_id: str, message: str) -> bool:
         """Add a user comment to the thread's comments JSONB field."""

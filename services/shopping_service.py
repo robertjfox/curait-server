@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from typing import Dict, Any, List, Optional, Tuple
 from clients.shopping.serper_client import SerperShoppingClient
 from clients.shopping.serpapi_client import SerpApiShoppingClient
@@ -31,20 +32,35 @@ class ShoppingService:
         self, 
         keywords: str, 
         user_data: Dict[str, Any], 
-    ) -> Tuple[List[Dict[str, Any]], int]:
+    ) -> Tuple[List[Dict[str, Any]], int, int]:
         """Search for products based on keywords."""
         try:
-            results, unfiltered_results_length, filtered_results_length = await self._client.search_item(
-                keywords=keywords,
-                user_gender=user_data.get("gender"),
-                min_price=config.SHOPPING_MIN_PRICE,    
-                max_price=config.SHOPPING_MAX_PRICE
+            results, unfiltered_results_length, filtered_results_length = await asyncio.wait_for(
+                self._client.search_item(
+                    keywords=keywords,
+                    user_gender=user_data.get("gender"),
+                ),
+                timeout=config.SHOPPING_SEARCH_TIMEOUT,
             )
 
             return results or [], unfiltered_results_length, filtered_results_length
+        except asyncio.TimeoutError:
+            logger.error(
+                "Shopping search timed out after %.1fs for keywords '%s'",
+                config.SHOPPING_SEARCH_TIMEOUT,
+                keywords,
+            )
+            return [], 0, 0
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
-            logger.error(f"Shopping search failed for keywords '{keywords}': {e}")
-            return []
+            logger.error(
+                "Shopping search failed for keywords '%s' (%s): %s",
+                keywords,
+                type(e).__name__,
+                e,
+            )
+            return [], 0, 0
     
     async def aclose(self):
         """Close the underlying client."""

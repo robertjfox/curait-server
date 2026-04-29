@@ -15,7 +15,11 @@ T = TypeVar("T")
 def build_query(keywords: Optional[str]) -> str:
     """Sanitize and build a consistent query prefix to bias toward higher quality items."""
     sanitized_keywords = (keywords or "").replace(",", " ").strip()
-    return f"{sanitized_keywords}"
+    sanitized_keywords = re.sub(r"\bcolor\s*:\s*", "", sanitized_keywords, flags=re.IGNORECASE)
+    sanitized_keywords = re.sub(r"\bwomens\b", "women", sanitized_keywords, flags=re.IGNORECASE)
+    sanitized_keywords = re.sub(r"\bmens\b", "men", sanitized_keywords, flags=re.IGNORECASE)
+    sanitized_keywords = re.sub(r"\s+", " ", sanitized_keywords).strip()
+    return sanitized_keywords
 
 
 def cap_results(results: Optional[List[T]], cap: int) -> List[T]:
@@ -32,35 +36,20 @@ def cap_results(results: Optional[List[T]], cap: int) -> List[T]:
 def create_async_httpx_client(timeout_seconds: float = 15.0) -> httpx.AsyncClient:
     """Create a tuned AsyncClient for external search services."""
     return httpx.AsyncClient(
-        http2=True,
-        timeout=httpx.Timeout(timeout_seconds),
-        limits=httpx.Limits(max_connections=100, max_keepalive_connections=50),
+        http2=False,
+        timeout=httpx.Timeout(
+            timeout_seconds,
+            connect=min(3.0, timeout_seconds),
+            read=timeout_seconds,
+            write=min(5.0, timeout_seconds),
+            pool=min(3.0, timeout_seconds),
+        ),
+        limits=httpx.Limits(max_connections=50, max_keepalive_connections=10),
     )
 
 
 def create_semaphore(max_concurrency: int) -> asyncio.Semaphore:
     return asyncio.Semaphore(max_concurrency)
-
-
-def filter_price_min_max(results: List[Dict[str, Any]], min_price: Optional[int], max_price: Optional[int]) -> List[Dict[str, Any]]:
-    filtered_results = []
-    for result in results:
-        price = result.get("price")
-
-        if price is None:
-            continue
-        
-        price_float = float(price.replace("$", "").replace(",", ""))
-        
-        if min_price and price_float < min_price:
-            continue
-        
-        if max_price and price_float > max_price:
-            continue
-        
-        filtered_results.append(result)
-    
-    return filtered_results
 
 
 def filter_blocked_sources(results: List[Dict[str, Any]], blocked_sources: List[str]) -> List[Dict[str, Any]]:

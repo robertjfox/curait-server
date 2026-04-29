@@ -1,22 +1,19 @@
-from typing import Dict, Any, List, Optional
+from typing import List, Optional
 from pydantic import BaseModel
 
 
 class ThreadCreateRequest(BaseModel):
     user_id: str
-    explore_idea_id: Optional[str] = None
 
 
 class ThreadChatRequest(BaseModel):
     message: str
-    user_intent: Optional[str] = None  # "CHAT", "MODIFICATION", "GENERATE" - if None, use LLM decision
-    outfit_id: Optional[str] = None  # Required when user_intent is "MODIFICATION"
 
 
 class VirtualTryOnRequest(BaseModel):
     user_id: str
-    thread_id: str
-    thumbnails: List[str]  # Flat array of image URLs
+    thread_id: Optional[str] = None
+    thumbnails: List[str]
     outfit_id: Optional[str] = None
 
 
@@ -24,4 +21,3 @@ class PromptSuggestionsResponse(BaseModel):
     success: bool
     user_id: str
     prompts: List[str]
-

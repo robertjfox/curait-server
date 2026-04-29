@@ -14,7 +14,6 @@ from utils.search_client_utils import (
     normalize_serpapi_results,
     filter_blocked_sources,
     filter_by_gender,
-    filter_by_rating,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,8 +35,6 @@ class SerpApiShoppingClient:
             self, 
             keywords: str, 
             user_gender: str, 
-            min_price: int | None = _config.SHOPPING_MIN_PRICE, 
-            max_price: int | None = _config.SHOPPING_MAX_PRICE,
             ) -> Tuple[List[Dict[str, Any]], int, int]:
 
         """Search for a single item using keywords, returns normalized shopping results"""
@@ -61,8 +58,6 @@ class SerpApiShoppingClient:
                 "hl": "en",
                 "location": "New York, New York, United States",
                 "num": num_to_fetch,
-                "min_price": min_price,
-                "max_price": max_price,
                 # "json_restrictor": "shopping_results[].{title, product_link, price, source, thumbnail, rating, reviews}"
             }
 
@@ -95,18 +90,6 @@ class SerpApiShoppingClient:
                     # Then cap to what we intend to rank
                     items = cap_results(items, _config.SHOPPING_RESULTS_TO_RANK)
 
-                    # Retry with relaxed filters if we don't have enough results
-                    if len(items) < 1:
-
-                        if params.get("min_price") is not None or params.get("max_price") is not None:
-                            logger.warning("Not enough search results, trying again without price filtering")
-                            return await self.search_item(
-                                keywords=keywords, 
-                                user_gender=user_gender, 
-                                min_price=None, 
-                                max_price=None,
-                            )
-                        
                     return items, unfiltered_results_length, filtered_results_length
 
                 except Exception as e:

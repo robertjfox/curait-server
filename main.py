@@ -23,12 +23,13 @@ logger = logging.getLogger(__name__)
 
 # Delayed imports to ensure logging/env suppression is in effect
 from services.virtual_tryon_service import VirtualTryOnService
-from api.routers.threads import router as threads_router
+from api.routers.threads import router as threads_router, thread_service
 from api.routers.virtual_tryon import router as virtual_tryon_router
 from api.routers.avatars import router as avatars_router
 from api.routers.prompt_suggestions import router as prompt_suggestions_router
 from api.routers.outfits import router as outfits_router
-from api.routers.explore_ideas import router as explore_ideas_router
+from api.routers.users import router as users_router
+from utils.background_tasks import shutdown_background_tasks
 
 
 # Initialize services
@@ -45,6 +46,8 @@ async def lifespan(app: FastAPI):
 	
 	# Shutdown
 	logger.info("\n\n🛑 🛑 🛑 🛑 🛑 SERVER SHUTTING DOWN 🛑 🛑 🛑 🛑 🛑")
+	await shutdown_background_tasks()
+	await thread_service.aclose()
 
 app = FastAPI(lifespan=lifespan, title="AI Stylist API", version="1.0.0")
 
@@ -63,7 +66,7 @@ app.include_router(virtual_tryon_router)
 app.include_router(avatars_router)
 app.include_router(prompt_suggestions_router)
 app.include_router(outfits_router)
-app.include_router(explore_ideas_router)
+app.include_router(users_router)
 
 
 @app.get("/")
@@ -82,7 +85,6 @@ async def detailed_health_check():
 			"/api/virtual-try-on",
 			"/api/prompt-suggestions/{user_id}/generate",
 			"/api/outfits/{outfit_id}/search-and-rank",
-		"/api/explore-ideas/generate-research",
 		]
 	}
 
@@ -93,7 +95,7 @@ if __name__ == "__main__":
 		"main:app",
 		host="0.0.0.0",
 		port=8000,
-		reload=True,  # Disabled auto-reload - manual restart required for code changes
+		reload=False,
 		log_level="info",
 		access_log=False,
 	) 

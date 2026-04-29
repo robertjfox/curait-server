@@ -1,72 +1,44 @@
-# Database Migrations
+# Database migrations
 
-This directory contains SQL migration files for the AI Stylist database schema.
+Single-file schema for Curait. Apply `001_schema.sql` once against a fresh
+Supabase project (via the SQL Editor) and you're done.
 
-## Schema Overview
-
-The database uses a **thread-based conversational architecture** similar to ChatGPT:
-
-```
-Users (1) ──→ (N) Threads (N) ──→ (N) Outfits (1) ──→ (N) Outfit_Items
-```
-
-## Tables
-
-### **users**
-
-- User profiles and long-lived style preferences
-- Stores personal info and persistent style context
-
-### **threads**
-
-- Conversation threads for ChatGPT-style interactions
-- Each thread maintains evolving conversation state and user comments as JSONB
-
-### **outfits**
-
-- AI-generated styling recommendations
-- Linked to threads
-
-### **outfit_items**
-
-- Individual clothing items within outfits
-- Contains search results and product links
-
-## Running Migrations
-
-### Supabase (Recommended)
-
-1. Run `001_initial_schema.sql` in Supabase SQL Editor
-2. Run `002_create_storage_buckets.sql` in Supabase SQL Editor
-3. Verify tables and storage buckets are created correctly
-4. Ensure Storage is enabled in your Supabase project settings
-
-### Local PostgreSQL
-
-```bash
-# Run migrations in order
-psql -d your_database -f migrations/001_initial_schema.sql
-```
-
-### Environment Setup
-
-Make sure your `.env` file has the correct database connection:
+## Schema shape
 
 ```
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+users ─1:N─► threads ─1:N─► outfits ─1:N─► outfit_items
 ```
 
-## Migration Files
+- `threads.comments` — JSONB array of `{ message, timestamp }`, one entry per
+  user turn. There is no separate `messages` table.
+- `outfits` are keyed to `thread_id` (no `message_id`). A thread accumulates
+  outfits over time as the user sends more messages.
+- `outfit_items.search_results` — JSONB list of ranked product candidates
+  returned by the shopping search (Serper / SerpAPI) + vision ranker.
 
-- `001_initial_schema.sql` - Core thread-based schema for ChatGPT-style UX
-- `002_create_storage_buckets.sql` - Storage buckets for images and assets
-- Future migrations will be numbered sequentially
+## Storage buckets
 
-## Schema Benefits
+`001_schema.sql` inserts the public storage buckets the server writes to:
 
-✅ **ChatGPT-like UX** - Persistent conversation threads  
-✅ **Clean relationships** - Clear data hierarchy  
-✅ **Performance optimized** - Proper indexes  
-✅ **Audit trail** - All conversations and styling saved  
-✅ **Scalable** - Easy to add features without breaking changes
+| Bucket | Written by |
+|---|---|
+| `virtual-tryon-images` | Gemini VTON output |
+| `product-ranking-grids` | Ranking grid composites |
+| `vton-image-input-grid` | Thumbnail grids used as VTON input |
+| `processed-bg-removal-imgs` | Background-removed assets |
+| `user-selfies` | User-uploaded selfies |
+| `user-avatars` | Gemini-rendered full-body avatars |
+| `outfit-flatlay-images` | Outfit flatlay renderings |
+
+## Applying
+
+1. Open your Supabase project's SQL Editor.
+2. Paste and run `001_schema.sql`.
+3. Confirm tables, indexes, triggers, and buckets exist.
+
+## Making changes
+
+When the schema evolves, edit `001_schema.sql` in place (this is an MVP
+with no production data — there's no migration runner). If you ever need
+versioned migrations, drop new numbered files alongside this one and track
+their application manually.

@@ -1,5 +1,6 @@
 import httpx
 import os
+import asyncio
 from typing import Dict, Any, List, Optional, Tuple
 import _config
 import logging
@@ -10,8 +11,6 @@ from utils.search_client_utils import (
     create_semaphore,
     filter_blocked_sources,
     filter_by_gender,
-    filter_price_min_max,
-    filter_by_rating,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,19 +35,13 @@ class SerperShoppingClient:
             self, 
             keywords: str, 
             user_gender: str, 
-            min_price: int | None = _config.SHOPPING_MIN_PRICE, 
-            max_price: int | None = _config.SHOPPING_MAX_PRICE,
-            ) -> Tuple[List[Dict[str, Any]], int]:
+            ) -> Tuple[List[Dict[str, Any]], int, int]:
         """Search for a single item using keywords, returns raw search results."""
         async with self._sem:
             if not self.api_key:
                 raise ValueError("SERPER_API_KEY is required")
             
             query = build_query(keywords)
-
-            if min_price and max_price:
-                query += f" ${min_price} - ${max_price}"
-
 
             # Request the configured number from Serper
             num_to_request = max(1, _config.SHOPPING_RESULTS_TO_FETCH)
@@ -66,43 +59,53 @@ class SerperShoppingClient:
                 "location": "New York, New York, United States",
             }
             
-            try:
-                response = await self._client.post(
-                    self.base_url,
-                    json=payload,
-                    headers=headers,
-                )
-                response.raise_for_status()
-                data = response.json()
-                
-                # Return raw shopping results - filter ALL results first, then cap for ranking
-                items = data.get("shopping", [])
+            max_attempts = 2
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    logger.info("Serper request %d/%d: %s", attempt, max_attempts, query)
+                    response = await self._client.post(
+                        self.base_url,
+                        json=payload,
+                        headers=headers,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    break
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.error(
+                        "❌ Serper search failed for '%s' (query='%s', attempt=%d/%d, %s): %s",
+                        keywords,
+                        query,
+                        attempt,
+                        max_attempts,
+                        type(e).__name__,
+                        e,
+                    )
+                    if attempt >= max_attempts:
+                        raise
+                    await asyncio.sleep(0.25 * attempt)
 
-                unfiltered_results_length = len(items)
-                
-                # Apply source filtering to ALL results
-                # Apply filtering but ensure we keep at least 8 results
-                filtered_items = filter_blocked_sources(items, _config.BLOCKED_SOURCES)
-                if len(filtered_items) >= 8:
-                    items = filtered_items
-                
-                filtered_items = filter_by_gender(items, user_gender)
-                if len(filtered_items) >= 8:
-                    items = filtered_items
-                
-                filtered_items = filter_price_min_max(items, min_price, max_price)
-                if len(filtered_items) >= 8:
-                    items = filtered_items
+            # Return raw shopping results - filter ALL results first, then cap for ranking
+            items = data.get("shopping", [])
 
-                # Then cap to what we intend to rank
-                filtered_results_length = len(items)
-                cap = max(_config.SHOPPING_RESULTS_TO_RANK, 1)
-                items = cap_results(items, cap)
+            unfiltered_results_length = len(items)
+            
+            # Apply source filtering to ALL results
+            # Apply filtering but ensure we keep at least 8 results
+            filtered_items = filter_blocked_sources(items, _config.BLOCKED_SOURCES)
+            if len(filtered_items) >= 8:
+                items = filtered_items
+            
+            filtered_items = filter_by_gender(items, user_gender)
+            if len(filtered_items) >= 8:
+                items = filtered_items
+            # Then cap to what we intend to rank
+            filtered_results_length = len(items)
+            cap = max(_config.SHOPPING_RESULTS_TO_RANK, 1)
+            items = cap_results(items, cap)
 
-                return items, unfiltered_results_length, filtered_results_length
-                
-            except Exception as e:
-                logger.error("❌ Serper search failed for '%s'", keywords)
-                raise e  
+            return items, unfiltered_results_length, filtered_results_length
             
             

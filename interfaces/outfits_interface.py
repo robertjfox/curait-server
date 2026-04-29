@@ -117,6 +117,23 @@ class OutfitsInterface:
         except Exception:
             return False
 
+    def get_next_cached_for_thread(self, thread_id: str) -> Optional[Dict[str, Any]]:
+        """Return the oldest cached outfit for a thread."""
+        try:
+            res = (
+                self._supabase
+                .table(self._table)
+                .select("*")
+                .eq("thread_id", thread_id)
+                .eq("is_cached", True)
+                .order("created_at")
+                .limit(1)
+                .execute()
+            )
+            return res.data[0] if res.data else None
+        except Exception:
+            return None
+
     def get_thread_outfits_with_ids(self, thread_id: str) -> List[Dict[str, Any]]:
         """Get all outfits for a thread with their IDs and is_cached status."""
         try:
@@ -130,4 +147,21 @@ class OutfitsInterface:
             )
             return res.data or []
         except Exception:
+            return []
+
+    def list_for_thread_with_items(self, thread_id: str) -> List[Dict[str, Any]]:
+        """Return all outfits for a thread, including their items, ordered for UI display."""
+        try:
+            res = (
+                self._supabase
+                .table(self._table)
+                .select("*, outfit_items (*)")
+                .eq("thread_id", thread_id)
+                .order("outfit_order")
+                .order("created_at")
+                .execute()
+            )
+            return res.data or []
+        except Exception as e:
+            logger.error(f"Failed to list outfits for thread {thread_id}: {e}")
             return []

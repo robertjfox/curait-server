@@ -18,6 +18,24 @@ class UsersInterface:
             return data
         return {}
 
+    def create_guest(self, first_name: str | None = None) -> Dict[str, Any]:
+        """Insert a minimal anonymous user row and return the new record."""
+        payload: Dict[str, Any] = {}
+        if first_name:
+            payload["first_name"] = first_name
+
+        response = (
+            self._supabase.table(self._table)
+            .insert(payload)
+            .execute()
+        )
+        data = response.data
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        raise RuntimeError("Failed to create guest user: empty Supabase response")
+
     def get(self, user_id: str) -> Optional[Dict[str, Any]]:
         response = self._supabase.table(self._table).select("*").eq("id", user_id).single().execute()
         return response.data

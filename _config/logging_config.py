@@ -130,9 +130,6 @@ def setup_logging(level=logging.INFO):
         # OpenAI SDK internals
         "openai._base_client", "openai.resources",
         
-        # Vision / CV libs
-        "insightface", "onnxruntime", "opencv", "cv2",
-        
         # Google / Gemini SDK + gRPC
         "google", "google.genai", "google.api_core", "google.cloud", "google.auth", "google.protobuf",
         "grpc", "absl"

@@ -7,8 +7,9 @@ import uuid
 import _config as config
 from clients.supabase_client import get_supabase_client
 from interfaces.outfits_interface import OutfitsInterface
+from utils.background_tasks import spawn
 from utils.image_processing.image_gen import prepare_pil_for_upload, detect_image_mime_and_ext, compose_user_images_row, split_row_image_into_cells, load_user_avatar_from_url
-from utils.image_processing.user_selfie_handler import get_user_avatar_url
+from utils.image_processing.user_selfie_handler import get_user_avatar_urls
 from ai.prompts.image_generation import create_flatlay_prompt, create_virtual_tryon_prompt, create_fullbody_avatar_prompt
 import time
 
@@ -48,12 +49,13 @@ logger = logging.getLogger(__name__)
 class GeminiClient:
 	"""Thin wrapper around Google Gemini image generation for VTON and related tasks."""
 	
-	MODEL = "gemini-2.5-flash-image-preview"
+	MODEL = "gemini-2.5-flash-image"
 
 	def __init__(self, *, api_key: Optional[str] = None):
 		if not GEMINI_AVAILABLE:
 			raise RuntimeError("Google Gemini SDK not available. Install with: pip install google-genai")
 		self.client = genai.Client(api_key=(api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")))
+		self._avatar_cache: Dict[str, Image.Image] = {}
 
 	def _extract_image_bytes(self, response) -> Optional[bytes]:
 		"""Extract image bytes from Gemini response."""
@@ -73,7 +75,15 @@ class GeminiClient:
 				model=self.MODEL,
 				contents=contents,
 				config=genai_types.GenerateContentConfig(
-					temperature=0.4, top_p=0.8, top_k=32, candidate_count=1, response_modalities=["Image"]
+					temperature=0.4,
+					top_p=0.8,
+					top_k=32,
+					candidate_count=1,
+					response_modalities=["IMAGE"],
+					image_config=genai_types.ImageConfig(
+						aspect_ratio="9:16",
+						image_size="1K",
+					),
 				) if contents and len(contents) > 1 else None
 			)
 			end_time = time.time()
@@ -83,12 +93,39 @@ class GeminiClient:
 			logger.error(f"[GEMINI] ❌ generation error: {e}")
 			return None
 
+	def _get_flatlay_avatar(self, user_id: str) -> Optional[Image.Image]:
+		if user_id in self._avatar_cache:
+			return self._avatar_cache[user_id].copy()
+
+		start_time = time.time()
+		avatar = None
+		for avatar_url in get_user_avatar_urls(user_id):
+			avatar = load_user_avatar_from_url(avatar_url)
+			if avatar is not None:
+				logger.info(f"[GEMINI] using avatar base image: {avatar_url}")
+				break
+		if avatar is None:
+			logger.info(f"[GEMINI] no stored avatar found for {user_id[:8]}; using text-only generation")
+			return None
+
+		prepared = prepare_pil_for_upload(avatar)
+		self._avatar_cache[user_id] = prepared.copy()
+		logger.info(f"[GEMINI] avatar loaded in {time.time() - start_time:.2f}s")
+		return prepared
+
 	def generate_virtual_tryon(self, *, grid_bytes: bytes, user_id: str) -> Optional[bytes]:
-		"""Generate virtual try-on using product grid."""
-		avatar_url = get_user_avatar_url(user_id)
-		user_img = prepare_pil_for_upload(load_user_avatar_from_url(avatar_url))
+		"""Generate virtual try-on using product grid. Requires a user avatar."""
+		avatar = None
+		for avatar_url in get_user_avatar_urls(user_id):
+			avatar = load_user_avatar_from_url(avatar_url)
+			if avatar is not None:
+				break
+		if avatar is None:
+			logger.info(f"⏭️  Skipping VTON for {user_id[:8]}: no avatar uploaded")
+			return None
+		user_img = prepare_pil_for_upload(avatar)
 		grid_img = prepare_pil_for_upload(Image.open(BytesIO(grid_bytes)))
-		
+
 		prompt = create_virtual_tryon_prompt()
 		return self._generate_image([prompt, user_img, grid_img])
 
@@ -109,62 +146,54 @@ class GeminiClient:
 		return self._generate_image([prompt, selfie_img])
 
 	async def generate_flatlay_and_upload(self, outfits: List[Dict[str, Any]], *, user_id: str, thread_id: Optional[str] = None) -> List[Optional[str]]:
-		"""Generate and upload flatlay images for multiple outfits."""
-		def _generate():
-			# Generate the prompt using the extracted function
-			combined_prompt = create_flatlay_prompt(outfits)
-			
-			try:
-				avatar_url = get_user_avatar_url(user_id)
-				base_image = load_user_avatar_from_url(avatar_url)
-				base_image = compose_user_images_row(base_image, len(outfits))
+		"""Generate and upload one image per outfit.
 
-				logger.info(f"Gemini prompt for {len(outfits)} outfits")
+		The older multi-outfit row flow is intentionally disabled for now because
+		it can leak the red cell separator into final images. Keep the row helper
+		functions around in case we bring batching back later.
+		"""
+		avatar = await asyncio.to_thread(self._get_flatlay_avatar, user_id)
+		urls: List[Optional[str]] = []
 
-				return self._generate_image([combined_prompt, base_image])
-			except Exception:
-				return self._generate_image([combined_prompt])  # Text-only fallback
-		
-		image_bytes = await asyncio.to_thread(_generate)
-		if not image_bytes:
-			return [None] * len(outfits)
-		
-		individual_images = split_row_image_into_cells(image_bytes, expected_cells=len(outfits))
-		
-		# Upload each individual image
-		urls = []
-		for i, img in enumerate(individual_images):
-			if img:
-				# Convert PIL Image to bytes for upload
-				buffer = BytesIO()
-				img_rgb = img.convert("RGB") if img.mode != "RGB" else img
-				img_rgb.save(buffer, format="JPEG", quality=85)
-				img_bytes = buffer.getvalue()
-				
-				mime_type, ext = detect_image_mime_and_ext(img_bytes)
-				filename = f"outfit_tryon_{uuid.uuid4().hex}{ext}"
-				bucket = getattr(config.model_config, 'FLATLAY_RENDERING', {}).get("bucket", "outfit-flatlay-images")
-				
-				supabase = get_supabase_client()
-				
-				# Simple retry logic for SSL issues
-				max_retries = 3
-				for attempt in range(max_retries):
-					try:
-						supabase.storage.from_(bucket).upload(filename, img_bytes, {"content-type": mime_type})
-						url = supabase.storage.from_(bucket).get_public_url(filename)
-						urls.append(url)
-						break
-					except Exception as e:
-						if attempt == max_retries - 1:
-							logger.error(f"Failed to upload after {max_retries} attempts: {e}")
-							urls.append(None)
-						else:
-							logger.warning(f"Upload attempt {attempt + 1} failed, retrying: {e}")
-							await asyncio.sleep(1)
-			else:
+		for outfit in outfits:
+			def _generate_single() -> Optional[bytes]:
+				prompt = create_flatlay_prompt([outfit])
+				logger.info("Gemini prompt for 1 outfit")
+
+				if avatar is None:
+					return self._generate_image([prompt])
+
+				try:
+					return self._generate_image([prompt, avatar.copy()])
+				except Exception:
+					logger.exception("Single flatlay generation failed, falling back to text-only")
+					return self._generate_image([prompt])
+
+			image_bytes = await asyncio.to_thread(_generate_single)
+			if not image_bytes:
 				urls.append(None)
-		
+				continue
+
+			mime_type, ext = detect_image_mime_and_ext(image_bytes)
+			filename = f"outfit_tryon_{uuid.uuid4().hex}{ext}"
+			bucket = getattr(config.model_config, 'FLATLAY_RENDERING', {}).get("bucket", "outfit-flatlay-images")
+			supabase = get_supabase_client()
+
+			max_retries = 3
+			for attempt in range(max_retries):
+				try:
+					supabase.storage.from_(bucket).upload(filename, image_bytes, {"content-type": mime_type})
+					url = supabase.storage.from_(bucket).get_public_url(filename)
+					urls.append(url)
+					break
+				except Exception as e:
+					if attempt == max_retries - 1:
+						logger.error(f"Failed to upload after {max_retries} attempts: {e}")
+						urls.append(None)
+					else:
+						logger.warning(f"Upload attempt {attempt + 1} failed, retrying: {e}")
+						await asyncio.sleep(1)
+
 		return urls
 
 	def launch_flatlay_task(
@@ -190,7 +219,7 @@ class GeminiClient:
 						except Exception:
 							pass
 
-		return asyncio.create_task(_task())
+		return spawn(_task(), name=f"flatlay:{(thread_id or 'unknown')[:6]}")
 
 def get_gemini_client() -> GeminiClient:
 	"""Get or create a GeminiClient instance."""

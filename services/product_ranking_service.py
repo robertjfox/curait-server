@@ -5,7 +5,7 @@ import time
 
 from clients.openai_client import get_openai_client
 import _config
-from utils.image_processing.create_image_grid import create_product_grid_and_upload
+from utils.image_processing.create_image_grid import create_product_grid
 import base64
 
 logger = logging.getLogger(__name__)
@@ -48,9 +48,9 @@ class ProductRankingService:
                 try:
                     # Extract keywords from item_context for the header
                     ranking_keywords = item_context.get("keywords") if item_context else None
-                    img_bytes, public_url, filename = await create_product_grid_and_upload(
+                    img_bytes = await create_product_grid(
                         products_with_images,
-                        ranking_keywords=ranking_keywords
+                        ranking_keywords=ranking_keywords,
                     )
                     grid_data_uri = f"data:image/jpeg;base64,{base64.b64encode(img_bytes).decode('ascii')}"
 
@@ -65,6 +65,7 @@ class ProductRankingService:
                     ratings = await self.openai_client.rank_products_flow(
                         user_data=user_data,    
                         item_context=item_context,
+                        products=products_with_images,
                         num_results=n,
                         grid_image_data_uri=grid_data_uri,
                         outfit_row=outfit_row,
@@ -77,8 +78,9 @@ class ProductRankingService:
                     fallback_ratings = [5] * len(fallback_results)
                     return fallback_results, fallback_ratings
 
-                # Rank and sort results using products_with_images instead of head
-                sorted_indices = sorted(range(n), key=lambda i: (ratings[i], i))
+                # Rank high-scoring products first. Keep low-scoring products as
+                # fallbacks so a bad model pass never erases the visible row.
+                sorted_indices = sorted(range(n), key=lambda i: (-ratings[i], i))
                 ranked_all: List[Dict[str, Any]] = []
                 for idx in sorted_indices:
                     product = products_with_images[idx].copy()
@@ -86,9 +88,6 @@ class ProductRankingService:
                     product["original_index"] = idx
                     ranked_all.append(product)
                 final_ranked = ranked_all[:top_k]
-
-                # filter out results with ranking 0
-                final_ranked = [r for r in final_ranked if r["ranking"] != 0]
 
                 return final_ranked, ratings
 

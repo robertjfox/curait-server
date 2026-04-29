@@ -11,10 +11,12 @@ import time
 from ai.prompts.generate_outfits import generate_outfit_prompts
 from ai.prompts.product_ranking_binary import build_product_ranking_prompt
 from ai.prompts.prompt_suggestions import build_prompt_suggestions_messages
+from ai.prompts.remix_outfit import build_remix_outfit_messages
 
 # Schemas
-from ai.schemas.outfits import generate_outfit_schema, generate_single_outfit_schema, generate_trend_outfit_analysis_schema
+from ai.schemas.outfits import generate_outfit_schema
 from ai.schemas.prompt_suggestions import generate_prompt_suggestions_schema
+from ai.schemas.remix_outfit import generate_remix_outfit_schema
 
 # Streaming/Parsing utils
 from utils.response_handler_utils import (
@@ -27,19 +29,22 @@ from _config.model_config import (
     PRODUCT_RANKING,    
     TITLE_GENERATION,       
     PROMPT_SUGGESTIONS,
-    THREAD_RESEARCH,
-    EXPLORE_IDEAS,
-    TREND_OUTFIT_VARIATIONS,        
+    STYLE_BRAND_CHIPS,
 )
-
-from ai.prompts.explore_ideas import (
-    build_explore_ideas_input,
-    build_trend_outfit_variation_prompt,
-    build_trend_outfit_analysis_messages,
-)
-from ai.schemas.explore_ideas import generate_explore_ideas_schema
 
 logger = logging.getLogger(__name__)
+
+
+def model_request_options(
+    model_config: Dict[str, Any],
+    *,
+    include_reasoning_effort: bool = True,
+) -> Dict[str, Any]:
+    options: Dict[str, Any] = {}
+    if include_reasoning_effort and model_config.get("reasoning_effort"):
+        options["reasoning_effort"] = model_config["reasoning_effort"]
+    return options
+
 
 class OpenAIClient:
     """Simple centralized OpenAI client (direct OpenAI calls; no wrappers)."""
@@ -64,15 +69,13 @@ class OpenAIClient:
         user_data: Dict[str, Any],
         conversation_history: List[Dict[str, Any]] = [],
         outfit_history: List[Dict[str, Any]] = [],
-        explore_idea_context: Optional[Dict[str, Any]] = None,
-        trend_outfits_context: Optional[List[Dict[str, Any]]] = None,
         on_outfit_batch: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
         on_single_outfit: Optional[Callable[[Dict[str, Any]], None]] = None,
         double_batch: bool,
     ) -> None:
         
         schema = generate_outfit_schema(double_batch)
-        messages = generate_outfit_prompts(user_data, outfit_history, conversation_history, double_batch, explore_idea_context, trend_outfits_context)
+        messages = generate_outfit_prompts(user_data, outfit_history, conversation_history, double_batch)
 
         start_time = time.time()
 
@@ -82,6 +85,7 @@ class OpenAIClient:
             response_format=schema,
             stream=True,
             stream_options={"include_usage": True},
+            **model_request_options(OUTFIT_GENERATION),
         )
 
         res = await process_streaming_outfit_response(
@@ -94,134 +98,62 @@ class OpenAIClient:
 
         return res
 
-    async def generate_trend_outfit_variations(
-        self,
-        *,
-        gender: str,
-        explore_title: str,
-        explore_description: str,
-        base_outfit_items: List[Dict[str, str]],
-        desired_count: int,
-        previous_outfit_variations: List[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
-        """Generate additional trend outfit variations aligned with an explore idea."""
-
-        messages = build_trend_outfit_variation_prompt(
-            gender=gender,
-            explore_title=explore_title,
-            explore_description=explore_description,
-            base_outfit_items=base_outfit_items,
-            desired_count=desired_count,
-            previous_outfit_variations=previous_outfit_variations,
-        )
-
-        logger.info(f"[OPENAI] trend outfit variation messages: {messages}")
-
-        schema = generate_outfit_schema(double_batch=False, num_outfits_override=desired_count)
-
-        try:
-            response = await self.client.chat.completions.create(
-                model=TREND_OUTFIT_VARIATIONS["model"],
-                messages=messages,
-                response_format=schema,
-            )
-        except Exception as e:
-            logger.error(f"[OPENAI] trend outfit variation request failed: {e}")
-            return []
-
-        try:
-            content = (response.choices[0].message.content or "").strip()
-            payload = json.loads(content)
-
-            logger.info(f"[OPENAI] trend outfit variation response: {payload}")
-
-            outfits = payload.get("outfits") or []
-            if len(outfits) > desired_count:
-                outfits = outfits[:desired_count]
-            return outfits
-        except Exception as e:
-            logger.error(f"[OPENAI] failed to parse variation response: {e}")
-            return []
-
-    async def analyze_trend_outfit_image(
-        self,
-        *,
-        image_url: str,
-    ) -> Dict[str, Any] | None:
-        """Use GPT vision model to extract outfit data from a reference image."""
-
-        messages = build_trend_outfit_analysis_messages(image_url=image_url)
-        schema = generate_trend_outfit_analysis_schema()
-
-        try:
-            response = await self.client.chat.completions.create(
-                model=TREND_OUTFIT_VARIATIONS["model"],
-                messages=messages,
-                response_format=schema,
-            )
-        except Exception as e:
-            logger.error(f"[OPENAI] trend outfit analysis failed: {e}")
-            return None
-
-        try:
-            content = (response.choices[0].message.content or "").strip()
-            payload = json.loads(content)
-            return payload
-        except Exception as e:
-            logger.error(f"[OPENAI] failed to parse trend outfit analysis: {e}")
-            return None
-
     async def rank_products_flow(
         self,
         *,
         user_data: Dict[str, Any],
         item_context: Dict[str, Any],
+        products: List[Dict[str, Any]],
         num_results: int,
         grid_image_data_uri: str,
         outfit_row: Dict[str, Any],
     ) -> List[int]:
-        """LLM-only ranking: builds messages + tool schema, calls model, returns ratings list."""
+        """LLM-only ranking: builds messages + JSON schema, calls model, returns ratings list."""
         messages = build_product_ranking_prompt(
             user_data=user_data,
             item_context=item_context,
+            products=products,
             num_results=num_results,
             grid_image_data_uri=grid_image_data_uri,
             outfit_row=outfit_row,
         )
 
-        tools = [{
-            "type": "function",
-            "function": {
+        schema = {
+            "type": "json_schema",
+            "json_schema": {
                 "name": "rank_products",
-                "description": "Return 0..1 ratings for each product index 0..N-1.",
-                "parameters": {
+                "strict": True,
+                "schema": {
                     "type": "object",
                     "properties": {
                         "ratings": {
                             "type": "array",
-                            "items": {"type": "integer", "minimum": 0, "maximum": 1},
+                            "items": {"type": "integer", "minimum": 0, "maximum": 3},
                             "minItems": num_results, "maxItems": num_results
                         }
                     },
                     "required": ["ratings"],
+                    "additionalProperties": False,
                 },
             },
-        }]
+        }
 
         resp = await self.client.chat.completions.create(
             model=PRODUCT_RANKING["model"],
             messages=messages,
-            tools=tools,
-            tool_choice={"type": "function", "function": {"name": "rank_products"}},
+            response_format=schema,
             top_p=1,
+            **model_request_options(PRODUCT_RANKING),
         )
         
         resp_obj = resp
 
         try:
-            tc = resp_obj.choices[0].message.tool_calls[0]
-            args = json.loads(tc.function.arguments)
+            content = resp_obj.choices[0].message.content or "{}"
+            args = json.loads(content)
             ratings = [int(x) for x in args["ratings"]]
+            if len(ratings) != num_results:
+                raise ValueError(f"Expected {num_results} ratings, got {len(ratings)}")
         except Exception as e:
             raise ValueError(f"Failed to parse ratings. Raw: {resp}") from e
 
@@ -239,6 +171,7 @@ class OpenAIClient:
             response = await self.client.chat.completions.create(
                 model=TITLE_GENERATION["model"],
                 messages=[{"role": "user", "content": prompt}],
+                **model_request_options(TITLE_GENERATION),
             )
             content = response.choices[0].message.content or ""
             # Sanitize line breaks / quotes
@@ -246,61 +179,34 @@ class OpenAIClient:
         except Exception:
             return "New Thread"
 
-    async def generate_thread_research(
+    async def generate_remix_outfit_flow(
         self,
         *,
         user_data: Dict[str, Any],
+        existing_outfit: Dict[str, Any],
+        existing_items: List[Dict[str, Any]],
+        feedback: str,
     ) -> Dict[str, Any]:
-        """Produce concise, wearable-oriented research for this user/session.
-
-        Returns a JSON-friendly dict. If model doesn't return JSON, falls back to {"text": str}.
-        """
-        profile = {k: v for k, v in (user_data or {}).items() if k != "context"}
-        ctx = (user_data or {}).get("context") or {}
-
-        instructions = (
-            "You are an expert fashion trend analyst and stylist. Create comprehensive style guidance that balances current trends with the user's personal context. "
-            "Focus on what's trending now in 2025 while considering what the user would realistically wear and feel confident in. "
-            "Include both mainstream and emerging trends, but filter them through the user's lifestyle and preferences.\n\n"
-            "Respond ONLY as strict JSON with keys: {\n"
-            "  \"wear_vibes\": [short strings],             // trending style directions and aesthetics to explore\n"
-            "  \"workhorse_items\": [short strings],        // reliable trending pieces they will actually wear\n"
-            "  \"no_gos\": [short strings],                 // trends to avoid due to fit, climate, or lifestyle constraints\n"
-            "  \"colors\": [short strings],                 // trending color palettes and seasonal hues\n"
-            "  \"fit_notes\": [short strings],              // current silhouette trends, proportions, and styling approaches\n"
-            "  \"trends_quicktake\": [short strings]        // key 2025 fashion trends that align with their profile\n"
-            "}"
+        """Return one revised outfit plan with keep/change item decisions."""
+        messages = build_remix_outfit_messages(
+            user_data=user_data,
+            existing_outfit=existing_outfit,
+            existing_items=existing_items,
+            feedback=feedback,
         )
+        schema = generate_remix_outfit_schema()
 
-        messages = [
-            {"role": "system", "content": instructions},
-            {
-                "role": "user",
-                "content": json.dumps({
-                    "profile": profile,
-                    "context": ctx,
-                }, separators=(",", ":")),
-            },
-        ]
-
-        try:
-            response = await self.client.chat.completions.create(
-                model=THREAD_RESEARCH["model"],
-                messages=messages,
-                top_p=1,
-            )
-            content = (response.choices[0].message.content or "").strip()
-            try:
-                parsed = json.loads(content)
-                if isinstance(parsed, dict):
-                    return parsed
-            except Exception:
-                pass
-            # Fallback to text blob
-            return {"text": content}
-        except Exception as e:
-            logger.warning(f"Thread research generation failed: {e}")
-            return {"text": ""}
+        response = await self.client.chat.completions.create(
+            model=OUTFIT_GENERATION["model"],
+            messages=messages,
+            response_format=schema,
+            **model_request_options(OUTFIT_GENERATION),
+        )
+        content = response.choices[0].message.content or "{}"
+        parsed = json.loads(content)
+        if not isinstance(parsed.get("items"), list):
+            raise ValueError("Remix planner returned no items")
+        return parsed
 
     async def generate_prompt_suggestions(
         self,
@@ -378,33 +284,83 @@ class OpenAIClient:
             logger.warning(f"Prompt suggestions failed, falling back: {e}")
             return []
 
-    async def generate_explore_ideas(self, *, gender: str, outfit_items: List[Dict[str, str]], source_img_url: str = None) -> Dict[str, Any]:
-        """Generate a simple explore idea title and description from outfit items."""
-        from datetime import datetime
-        
-        prompt = build_explore_ideas_input(
-            gender=gender,
-            date_iso=datetime.now().isoformat(),
-            outfit_items=outfit_items,
-            source_img_url=source_img_url,
+    async def generate_style_brand_chips(
+        self,
+        *,
+        gender: str,
+        location: str,
+        job: str | None = None,
+    ) -> List[str]:
+        """Generate brand chips that infer style context during onboarding."""
+        fallback = [
+            "Uniqlo",
+            "COS",
+            "J.Crew",
+            "Todd Snyder",
+            "Aritzia",
+            "Nike",
+            "Adidas",
+            "Ralph Lauren",
+            "Everlane",
+            "Levi's",
+            "Zara",
+            "The Row",
+        ]
+        prompt = (
+            "Generate exactly 18 fashion brand chips for a personal styling onboarding flow.\n"
+            "The brands should infer the user's style taste. Mix accessible, mid-market, premium, "
+            "streetwear, classic, and contemporary brands. Use real brand names only. "
+            "No explanations, no categories, no duplicates.\n\n"
+            f"Gender: {gender or 'unspecified'}\n"
+            f"Location: {location or 'unspecified'}\n"
+            f"Job: {job or 'unspecified'}"
         )
+        schema = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "style_brand_chips",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "brands": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 18,
+                            "maxItems": 18,
+                        }
+                    },
+                    "required": ["brands"],
+                    "additionalProperties": False,
+                },
+            },
+        }
 
         try:
-            # Handle both string and list formats for messages
-            messages = [{"role": "user", "content": prompt}] if isinstance(prompt, str) else prompt
-
             response = await self.client.chat.completions.create(
-                model=EXPLORE_IDEAS["model"],
-                messages=messages,
-                response_format=generate_explore_ideas_schema(),
+                model=STYLE_BRAND_CHIPS["model"],
+                messages=[
+                    {"role": "system", "content": "You are a fashion taste profiler."},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format=schema,
+                **model_request_options(STYLE_BRAND_CHIPS),
             )
-            
-            content = (response.choices[0].message.content or "").strip()
-            return json.loads(content) or None
-            
+            content = response.choices[0].message.content or ""
+            parsed = json.loads(content)
+            brands = parsed.get("brands")
+            if not isinstance(brands, list):
+                raise ValueError("No brands returned")
+
+            cleaned: List[str] = []
+            for brand in brands:
+                value = str(brand or "").strip()
+                if value and value not in cleaned:
+                    cleaned.append(value)
+            return (cleaned + fallback)[:18]
         except Exception as e:
-            logger.warning(f"[EXPLORE_IDEA] failed to generate explore ideas: {e}")
-            return None
+            logger.warning(f"Style brand chips failed, falling back: {e}")
+            return fallback
 
 def get_openai_client() -> OpenAIClient:
     """Get an OpenAI client instance."""
