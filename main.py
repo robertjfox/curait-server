@@ -91,10 +91,11 @@ async def detailed_health_check():
 
 if __name__ == "__main__":
 	import uvicorn
+	is_dev = os.getenv("IS_DEV", "").lower() in ("1", "true", "yes", "on")
 	uvicorn.run(
 		"main:app",
 		host="0.0.0.0",
-		port=8000,
+		port=int(os.getenv("PORT", "8000" if is_dev else "8080")),
 		reload=False,
 		log_level="info",
 		access_log=False,
