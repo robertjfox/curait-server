@@ -13,6 +13,7 @@ GPT_O4_MINI_DEEP_RESEARCH = "o4-mini-deep-research-2025-06-26"
 GPT_IMAGE_1 = "gpt-image-1"
 GPT_5_4 = 'gpt-5.4'
 GPT_5_4_MINI = "gpt-5.4-mini"
+GPT_5_5 = 'gpt-5.5'
 
 # CORE FUNCTIONALITY CONFIGS ===============================
 
@@ -33,8 +34,8 @@ TITLE_GENERATION = {
 }
 
 PROMPT_SUGGESTIONS = {
-       "model": GPT_5_MINI,
-       "reasoning_effort": 'medium',
+       "model": GPT_5_5,
+       "reasoning_effort": 'high',
 }
 
 STYLE_BRAND_CHIPS = {

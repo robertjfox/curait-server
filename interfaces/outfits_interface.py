@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 from clients.supabase_client import get_supabase_client
 from interfaces.outfit_items_interface import OutfitItemsInterface
+from interfaces._retry import with_retry, is_transient_supabase_error
 
 import logging
 logger = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ class OutfitsInterface:
         thread_id: str,
         name: str,
         is_cached: bool = False,
+        outfit_order: Optional[int] = None,
     ) -> Optional[str]:
         """Create a new outfit and return its ID."""
         payload: Dict[str, Any] = {
@@ -27,6 +29,8 @@ class OutfitsInterface:
             "name": name,
             "is_cached": is_cached,
         }
+        if outfit_order is not None:
+            payload["outfit_order"] = outfit_order
         try:
             res = self._supabase.table(self._table).insert(payload).execute()
             return res.data[0]["id"] if res and res.data else None
@@ -35,6 +39,50 @@ class OutfitsInterface:
 
             logger.error(f"Failed to create outfit: {e}")
             return None
+
+    def get_max_outfit_order(
+        self,
+        thread_id: str,
+        only_visible: bool = True,
+    ) -> int:
+        """Return the highest outfit_order in a thread (defaults to -1).
+
+        If `only_visible` is True, cached/hidden outfits are excluded so a
+        new visible row can be appended *after* every existing visible one
+        without disturbing whatever's still queued in the cache.
+        """
+        try:
+            query = (
+                self._supabase
+                .table(self._table)
+                .select("outfit_order")
+                .eq("thread_id", thread_id)
+            )
+            if only_visible:
+                query = query.eq("is_cached", False)
+            res = (
+                query
+                .order("outfit_order", desc=True)
+                .limit(1)
+                .execute()
+            )
+            rows = res.data or []
+            if not rows:
+                return -1
+            value = rows[0].get("outfit_order")
+            return int(value) if value is not None else 0
+        except Exception:
+            return -1
+
+    def update_outfit_order(self, outfit_id: str, outfit_order: int) -> bool:
+        """Update only the `outfit_order` column for an outfit."""
+        try:
+            self._supabase.table(self._table).update(
+                {"outfit_order": outfit_order}
+            ).eq("id", outfit_id).execute()
+            return True
+        except Exception:
+            return False
 
     def update_vton_image(self, outfit_id: str, vton_image_url: str) -> bool:
         """Update the virtual try-on image URL for an outfit."""
@@ -186,7 +234,7 @@ class OutfitsInterface:
 
     def list_for_thread_with_items(self, thread_id: str) -> List[Dict[str, Any]]:
         """Return all outfits for a thread, including their items, ordered for UI display."""
-        try:
+        def _query() -> List[Dict[str, Any]]:
             res = (
                 self._supabase
                 .table(self._table)
@@ -197,6 +245,9 @@ class OutfitsInterface:
                 .execute()
             )
             return res.data or []
+        try:
+            return with_retry(_query)
         except Exception as e:
-            logger.error(f"Failed to list outfits for thread {thread_id}: {e}")
+            level = logger.warning if is_transient_supabase_error(e) else logger.error
+            level("Failed to list outfits for thread %s: %s", thread_id, e)
             return []

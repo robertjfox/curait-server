@@ -295,7 +295,7 @@ async def create_product_grid(
     
     # Process images in parallel using thread pool
     image_area_h = cell_h - METADATA_TOP_HEIGHT - METADATA_BOTTOM_HEIGHT
-    
+
     # Prepare arguments for parallel processing
     process_args = []
     for i, (product, label) in enumerate(zip(products, labels)):
@@ -304,23 +304,25 @@ async def create_product_grid(
         source = product.get("source", "Unknown Source")
         price = product.get("price", "")
         process_args.append((img, cell_w, cell_h, image_area_h, label, title, source, price))
-    
-    # Process images in parallel
-    with ThreadPoolExecutor(max_workers=min(8, len(process_args))) as executor:
-        processed_cells = list(executor.map(_process_single_image, process_args))
-    
-    # Compose grid
-    successful_images = 0
-    for i, cell_img in enumerate(processed_cells):
-        if cell_img is not None:
-            successful_images += 1
+
+    # Run the per-cell PIL work and the final composition/encoding in a
+    # worker thread so the event loop is free during multi-second batches.
+    def _compose_and_encode() -> bytes:
+        max_workers = max(1, min(_config.IMAGE_GRID_WORKERS, len(process_args)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            processed_cells = list(executor.map(_process_single_image, process_args))
+
+        for i, cell_img in enumerate(processed_cells):
+            if cell_img is None:
+                continue
             r = i // cols
             c = i % cols
             x = padding + c * (cell_w + padding)
-            y = header_height + padding + r * (cell_h + padding)  # Offset by header height
+            y = header_height + padding + r * (cell_h + padding)
             grid.paste(cell_img, (x, y))
-    
-    # Encode to JPEG bytes with lower quality for smaller size
-    out = io.BytesIO()
-    grid.save(out, format="JPEG", quality=70, optimize=True)  # Reduced quality from 85
-    return out.getvalue()
+
+        out = io.BytesIO()
+        grid.save(out, format="JPEG", quality=70, optimize=True)
+        return out.getvalue()
+
+    return await asyncio.to_thread(_compose_and_encode)

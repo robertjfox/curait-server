@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 from clients.supabase_client import get_supabase_client
+from interfaces._retry import with_retry, is_transient_supabase_error
 import logging
 
 logger = logging.getLogger(__name__)
@@ -30,10 +31,14 @@ class ThreadsInterface:
 
     def get(self, thread_id: str) -> Optional[Dict[str, Any]]:
         """Get a single thread by ID."""
-        try:
+        def _query() -> Optional[Dict[str, Any]]:
             res = self._supabase.table(self._table).select("*").eq("id", thread_id).single().execute()
             return res.data
-        except Exception:
+        try:
+            return with_retry(_query)
+        except Exception as e:
+            if is_transient_supabase_error(e):
+                logger.warning("Transient Supabase error on threads.get(%s): %s", thread_id, e)
             return None
 
     def update_title(self, thread_id: str, title: str) -> bool:
@@ -64,7 +69,7 @@ class ThreadsInterface:
 
     def list_summaries_by_user(self, user_id: str) -> List[Dict[str, Any]]:
         """Return thread summaries (no comments/context) for a user, most-recent first."""
-        try:
+        def _query() -> List[Dict[str, Any]]:
             res = (
                 self._supabase
                     .table(self._table)
@@ -74,8 +79,11 @@ class ThreadsInterface:
                     .execute()
             )
             return res.data or []
+        try:
+            return with_retry(_query)
         except Exception as e:
-            logger.error(f"Failed to list thread summaries: {e}")
+            level = logger.warning if is_transient_supabase_error(e) else logger.error
+            level("Failed to list thread summaries: %s", e)
             return []
 
     def delete(self, thread_id: str) -> bool:

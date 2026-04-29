@@ -1,19 +1,33 @@
 import asyncio
 import logging
-from typing import Awaitable, Set
+from typing import Awaitable, Dict, Set
 
 logger = logging.getLogger(__name__)
 
 _tasks: Set[asyncio.Task] = set()
+_tasks_by_key: Dict[str, asyncio.Task] = {}
 
 
-def spawn(coro: Awaitable, *, name: str) -> asyncio.Task:
+def spawn(coro: Awaitable, *, name: str, key: str | None = None) -> asyncio.Task:
     """Track fire-and-forget work so shutdown can cancel it cleanly."""
+    if key:
+        existing = _tasks_by_key.get(key)
+        if existing and not existing.done():
+            logger.info("Skipping duplicate background task: %s", key)
+            close = getattr(coro, "close", None)
+            if callable(close):
+                close()
+            return existing
+
     task = asyncio.create_task(coro, name=name)
     _tasks.add(task)
+    if key:
+        _tasks_by_key[key] = task
 
     def _done(completed: asyncio.Task) -> None:
         _tasks.discard(completed)
+        if key and _tasks_by_key.get(key) is completed:
+            _tasks_by_key.pop(key, None)
         if completed.cancelled():
             logger.info("Cancelled background task: %s", completed.get_name())
             return
@@ -31,6 +45,14 @@ def spawn(coro: Awaitable, *, name: str) -> asyncio.Task:
 
     task.add_done_callback(_done)
     return task
+
+
+def background_task_counts() -> dict:
+    return {
+        "total": len(_tasks),
+        "keyed": len(_tasks_by_key),
+        "tasks": [task.get_name() for task in _tasks if not task.done()],
+    }
 
 
 async def shutdown_background_tasks(timeout: float = 5.0) -> None:

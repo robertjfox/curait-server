@@ -11,6 +11,7 @@ from utils.search_client_utils import (
     create_semaphore,
     filter_blocked_sources,
     filter_by_gender,
+    filter_by_min_price,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,8 @@ class SerperShoppingClient:
             max_attempts = 2
             for attempt in range(1, max_attempts + 1):
                 try:
-                    logger.info("Serper request %d/%d: %s", attempt, max_attempts, query)
+                    if attempt > 1:
+                        logger.info("Serper retry %d/%d: %s", attempt, max_attempts, query)
                     response = await self._client.post(
                         self.base_url,
                         json=payload,
@@ -91,16 +93,19 @@ class SerperShoppingClient:
             items = data.get("shopping", [])
 
             unfiltered_results_length = len(items)
-            
-            # Apply source filtering to ALL results
-            # Apply filtering but ensure we keep at least 8 results
-            filtered_items = filter_blocked_sources(items, _config.BLOCKED_SOURCES)
-            if len(filtered_items) >= 8:
-                items = filtered_items
-            
+
+            # Hard, deterministic filters (always applied, no safety net):
+            #   1. Blocked sources (eBay / aliexpress / etc.)
+            #   2. Minimum price floor (SHOPPING_MIN_PRICE)
+            items = filter_blocked_sources(items, _config.BLOCKED_SOURCES)
+            items = filter_by_min_price(items, _config.SHOPPING_MIN_PRICE)
+
+            # Gender filter is best-effort: keep unfiltered if it would
+            # leave us with too few products to rank meaningfully.
             filtered_items = filter_by_gender(items, user_gender)
             if len(filtered_items) >= 8:
                 items = filtered_items
+
             # Then cap to what we intend to rank
             filtered_results_length = len(items)
             cap = max(_config.SHOPPING_RESULTS_TO_RANK, 1)

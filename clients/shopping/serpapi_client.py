@@ -8,12 +8,13 @@ import random
 import _config
 from utils.search_client_utils import (
     build_query,
-    cap_results, 
+    cap_results,
     create_async_httpx_client,
     create_semaphore,
     normalize_serpapi_results,
     filter_blocked_sources,
     filter_by_gender,
+    filter_by_min_price,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,18 +76,16 @@ class SerpApiShoppingClient:
                     unfiltered_results_length = len(items)
 
                     items = normalize_serpapi_results(items)
-                    
-                    # Apply source filtering to ALL results
+
+                    # Hard, deterministic filters (always applied):
+                    #   1. Blocked sources (eBay / aliexpress / etc.)
+                    #   2. Minimum price floor (SHOPPING_MIN_PRICE)
                     items = filter_blocked_sources(items, _config.BLOCKED_SOURCES)
+                    items = filter_by_min_price(items, _config.SHOPPING_MIN_PRICE)
                     items = filter_by_gender(items, user_gender)
-                    
-                    # items_before_rating_filter = items
-                    # items = filter_by_rating(items)
-                    # if len(items) < 8:
-                    #     items = items_before_rating_filter
 
                     filtered_results_length = len(items)
-                    
+
                     # Then cap to what we intend to rank
                     items = cap_results(items, _config.SHOPPING_RESULTS_TO_RANK)
 

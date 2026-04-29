@@ -56,6 +56,64 @@ def create_semaphore(max_concurrency: int) -> asyncio.Semaphore:
     return asyncio.Semaphore(max_concurrency)
 
 
+_PRICE_NUMBER_RE = re.compile(r"\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?")
+
+
+def parse_price(price: Any) -> Optional[float]:
+    """Best-effort numeric parse of a Serper/SerpApi price field.
+
+    Returns ``None`` for anything we can't confidently turn into a positive
+    number. Supports ints/floats, plain strings (`$50`, `$1,299.00`,
+    `From $30`, `USD 50`, `$50 - $80` — first number is taken).
+    """
+    if price is None:
+        return None
+    if isinstance(price, (int, float)):
+        try:
+            value = float(price)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+    if not isinstance(price, str):
+        return None
+    text = price.strip()
+    if not text:
+        return None
+    match = _PRICE_NUMBER_RE.search(text)
+    if not match:
+        return None
+    try:
+        value = float(match.group(0).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def filter_by_min_price(
+    results: List[Dict[str, Any]],
+    min_price: float,
+) -> List[Dict[str, Any]]:
+    """Drop products priced below ``min_price``.
+
+    Items with no parseable price are dropped (the floor can't be confirmed),
+    which makes this filter deterministic regardless of provider quirks.
+    """
+    if not results:
+        return []
+    if not min_price or min_price <= 0:
+        return list(results)
+
+    out: List[Dict[str, Any]] = []
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        value = parse_price(result.get("price"))
+        if value is None or value < min_price:
+            continue
+        out.append(result)
+    return out
+
+
 def filter_blocked_sources(results: List[Dict[str, Any]], blocked_sources: List[str]) -> List[Dict[str, Any]]:
     if not blocked_sources or not results:
         return results

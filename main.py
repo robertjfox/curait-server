@@ -17,41 +17,35 @@ from _config.logging_config import setup_logging
 
 load_dotenv()
 
-# Configure logging early (before importing routers/services)
-setup_logging(level=logging.INFO)  # Temporarily enable debug logging
+setup_logging(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Delayed imports to ensure logging/env suppression is in effect
-from services.virtual_tryon_service import VirtualTryOnService
-from api.routers.threads import router as threads_router, thread_service
+from api.routers.threads import router as threads_router
 from api.routers.virtual_tryon import router as virtual_tryon_router
 from api.routers.avatars import router as avatars_router
 from api.routers.prompt_suggestions import router as prompt_suggestions_router
 from api.routers.outfits import router as outfits_router
 from api.routers.users import router as users_router
-from utils.background_tasks import shutdown_background_tasks
+from api.routers.saved_products import router as saved_products_router
+from clients.openai_client import close_openai_client
+from services.shopping_service import close_shopping_service
+from utils.background_tasks import background_task_counts, shutdown_background_tasks
 
-
-# Initialize services
-virtual_tryon_service = VirtualTryOnService()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-	"""Handle application startup and shutdown events"""
-	# Startup
+	"""Handle application startup and shutdown."""
 	logger.info("\n\n🚀 🚀 🚀 🚀 🚀 SERVER STARTING UP 🚀 🚀 🚀 🚀 🚀")
-	
-
 	yield
-	
-	# Shutdown
 	logger.info("\n\n🛑 🛑 🛑 🛑 🛑 SERVER SHUTTING DOWN 🛑 🛑 🛑 🛑 🛑")
 	await shutdown_background_tasks()
-	await thread_service.aclose()
+	await close_shopping_service()
+	await close_openai_client()
+
 
 app = FastAPI(lifespan=lifespan, title="AI Stylist API", version="1.0.0")
 
-# Add CORS middleware
 app.add_middleware(
 	CORSMiddleware,
 	allow_origins=_config.CORS_ORIGINS,
@@ -60,18 +54,19 @@ app.add_middleware(
 	allow_headers=["*"],
 )
 
-# Register routers
 app.include_router(threads_router)
 app.include_router(virtual_tryon_router)
 app.include_router(avatars_router)
 app.include_router(prompt_suggestions_router)
 app.include_router(outfits_router)
 app.include_router(users_router)
+app.include_router(saved_products_router)
 
 
 @app.get("/")
 async def health_check():
 	return {"status": "healthy", "service": "AI Stylist API", "version": "1.0.0"}
+
 
 @app.get("/health")
 async def detailed_health_check():
@@ -80,12 +75,13 @@ async def detailed_health_check():
 		"service": "AI Stylist API",
 		"version": "1.0.0",
 		"cors_origins": _config.CORS_ORIGINS,
+		"background_tasks": background_task_counts(),
 		"endpoints": [
 			"/api/threads",
 			"/api/virtual-try-on",
 			"/api/prompt-suggestions/{user_id}/generate",
 			"/api/outfits/{outfit_id}/search-and-rank",
-		]
+		],
 	}
 
 
@@ -99,4 +95,4 @@ if __name__ == "__main__":
 		reload=False,
 		log_level="info",
 		access_log=False,
-	) 
+	)

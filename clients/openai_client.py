@@ -6,6 +6,7 @@ import _config as config
 import json
 import httpx
 import time
+from typing import cast
 
 # Prompts
 from ai.prompts.generate_outfits import generate_outfit_prompts
@@ -62,6 +63,9 @@ class OpenAIClient:
             api_key=os.getenv("OPENAI_API_KEY"),
             timeout=timeout
         )
+
+    async def aclose(self) -> None:
+        await self.client.close()
 
     async def generate_outfits_flow(
         self,
@@ -362,6 +366,21 @@ class OpenAIClient:
             logger.warning(f"Style brand chips failed, falling back: {e}")
             return fallback
 
+_openai_client: Optional[OpenAIClient] = None
+
+
 def get_openai_client() -> OpenAIClient:
-    """Get an OpenAI client instance."""
-    return OpenAIClient() 
+    """Get the process-wide OpenAI client."""
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = OpenAIClient()
+    return _openai_client
+
+
+async def close_openai_client() -> None:
+    global _openai_client
+    if _openai_client is None:
+        return
+    client = cast(OpenAIClient, _openai_client)
+    _openai_client = None
+    await client.aclose()
