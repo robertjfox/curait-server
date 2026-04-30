@@ -96,7 +96,7 @@ class GeminiClient:
 				return part.inline_data.data
 		return None
 
-	def _generate_image(self, contents: List) -> Optional[bytes]:
+	def _generate_image(self, contents: List, *, aspect_ratio: str = "9:16") -> Optional[bytes]:
 		try:
 			start_time = time.time()
 			logger.info("[GEMINI] ▶︎ request started")
@@ -110,7 +110,7 @@ class GeminiClient:
 					candidate_count=1,
 					response_modalities=["IMAGE"],
 					image_config=genai_types.ImageConfig(
-						aspect_ratio="9:16",
+						aspect_ratio=aspect_ratio,
 						image_size="1K",
 					),
 				) if contents and len(contents) > 1 else None,
@@ -178,7 +178,7 @@ class GeminiClient:
 			weight_kg=weight_kg,
 			gender=gender,
 		)
-		return self._generate_image([prompt, selfie_img])
+		return self._generate_image([prompt, selfie_img], aspect_ratio="3:4")
 
 	async def generate_flatlay_and_upload(
 		self,

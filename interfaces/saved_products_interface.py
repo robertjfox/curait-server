@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 import logging
 
 from clients.supabase_client import get_supabase_client
+from interfaces._retry import with_retry, is_transient_supabase_error
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,7 @@ class SavedProductsInterface:
 			return False
 
 	def list_by_user(self, user_id: str) -> List[Dict[str, Any]]:
-		try:
+		def _query() -> List[Dict[str, Any]]:
 			res = (
 				self._supabase
 				.table(self._table)
@@ -83,6 +84,9 @@ class SavedProductsInterface:
 				.execute()
 			)
 			return res.data or []
+		try:
+			return with_retry(_query)
 		except Exception as e:
-			logger.error(f"Failed to list saved products for user {user_id[:6]}: {e}")
+			level = logger.warning if is_transient_supabase_error(e) else logger.error
+			level("Failed to list saved products for user %s: %s", user_id[:6], e)
 			return []

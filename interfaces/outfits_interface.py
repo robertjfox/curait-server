@@ -142,7 +142,7 @@ class OutfitsInterface:
 
     def get(self, outfit_id: str) -> Optional[Dict[str, Any]]:
         """Fetch a single outfit row by ID."""
-        try:
+        def _query() -> Optional[Dict[str, Any]]:
             res = (
                 self._supabase
                 .table(self._table)
@@ -152,7 +152,11 @@ class OutfitsInterface:
                 .execute()
             )
             return res.data
-        except Exception:
+        try:
+            return with_retry(_query)
+        except Exception as e:
+            if is_transient_supabase_error(e):
+                logger.warning("Transient Supabase error on outfits.get(%s): %s", outfit_id, e)
             return None
 
     def update_is_cached(self, outfit_id: str, is_cached: bool) -> bool:
@@ -182,7 +186,7 @@ class OutfitsInterface:
 
     def list_saved_for_user(self, user_id: str) -> List[Dict[str, Any]]:
         """Return all saved outfits for a user, including products."""
-        try:
+        def _query() -> List[Dict[str, Any]]:
             res = (
                 self._supabase
                 .table(self._table)
@@ -196,8 +200,11 @@ class OutfitsInterface:
             for outfit in outfits:
                 outfit.pop("threads", None)
             return outfits
+        try:
+            return with_retry(_query)
         except Exception as e:
-            logger.error(f"Failed to list saved outfits for user {user_id}: {e}")
+            level = logger.warning if is_transient_supabase_error(e) else logger.error
+            level("Failed to list saved outfits for user %s: %s", user_id, e)
             return []
 
     def get_next_cached_for_thread(self, thread_id: str) -> Optional[Dict[str, Any]]:
@@ -219,7 +226,7 @@ class OutfitsInterface:
 
     def get_thread_outfits_with_ids(self, thread_id: str) -> List[Dict[str, Any]]:
         """Get all outfits for a thread with their IDs and is_cached status."""
-        try:
+        def _query() -> List[Dict[str, Any]]:
             res = (
                 self._supabase
                 .table(self._table)
@@ -229,7 +236,11 @@ class OutfitsInterface:
                 .execute()
             )
             return res.data or []
-        except Exception:
+        try:
+            return with_retry(_query)
+        except Exception as e:
+            if is_transient_supabase_error(e):
+                logger.warning("Transient Supabase error on outfits.get_thread_outfits_with_ids(%s): %s", thread_id, e)
             return []
 
     def list_for_thread_with_items(self, thread_id: str) -> List[Dict[str, Any]]:

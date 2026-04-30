@@ -2,6 +2,10 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 from clients.supabase_client import get_supabase_client
+from interfaces._retry import with_retry, is_transient_supabase_error
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class OutfitItemsInterface:
@@ -81,7 +85,7 @@ class OutfitItemsInterface:
 
     def get_by_outfit(self, outfit_id: str) -> List[Dict[str, Any]]:
         """Get all items for an outfit."""
-        try:
+        def _query() -> List[Dict[str, Any]]:
             res = (
                 self._supabase.table(self._table)
                 .select("*")
@@ -89,7 +93,11 @@ class OutfitItemsInterface:
                 .execute()
             )
             return res.data or []
-        except Exception:
+        try:
+            return with_retry(_query)
+        except Exception as e:
+            if is_transient_supabase_error(e):
+                logger.warning("Transient Supabase error on outfit_items.get_by_outfit(%s): %s", outfit_id, e)
             return []
 
     def get_by_thread(self, thread_id: str) -> List[Dict[str, Any]]:

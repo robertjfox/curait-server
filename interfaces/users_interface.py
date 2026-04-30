@@ -1,5 +1,9 @@
 from typing import Any, Dict, Optional
 from clients.supabase_client import get_supabase_client
+from interfaces._retry import with_retry, is_transient_supabase_error
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class UsersInterface:
@@ -37,8 +41,16 @@ class UsersInterface:
         raise RuntimeError("Failed to create guest user: empty Supabase response")
 
     def get(self, user_id: str) -> Optional[Dict[str, Any]]:
-        response = self._supabase.table(self._table).select("*").eq("id", user_id).single().execute()
-        return response.data
+        def _query() -> Optional[Dict[str, Any]]:
+            response = self._supabase.table(self._table).select("*").eq("id", user_id).single().execute()
+            return response.data
+        try:
+            return with_retry(_query)
+        except Exception as e:
+            if is_transient_supabase_error(e):
+                logger.warning("Transient Supabase error on users.get(%s): %s", user_id, e)
+                return None
+            raise
 
     def update(self, user_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if not updates:

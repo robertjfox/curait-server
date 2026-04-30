@@ -39,7 +39,7 @@ PROMPT_SUGGESTIONS = {
 }
 
 STYLE_BRAND_CHIPS = {
-       "model": GPT_5_4,
-       "reasoning_effort": 'medium',
+       "model": GPT_5_5,
+       "reasoning_effort": 'high',
 }
 

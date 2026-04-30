@@ -14,6 +14,13 @@ class StyleBrandChipsRequest(BaseModel):
 	gender: str | None = None
 	location: str | None = None
 	job: str | None = None
+	body_shape: str | None = None
+	fit_preference: str | None = None
+	lifestyle_occasions: list[str] = []
+	daily_dress_code: str | None = None
+	color_comfort: list[str] = []
+	style_avoids: list[str] = []
+	budget_preference: str | None = None
 
 
 @router.post("/guest", response_model=dict)
@@ -72,6 +79,13 @@ async def generate_style_brand_chips(request: StyleBrandChipsRequest):
 			gender=request.gender or "",
 			location=request.location or "",
 			job=request.job,
+			body_shape=request.body_shape,
+			fit_preference=request.fit_preference,
+			lifestyle_occasions=request.lifestyle_occasions,
+			daily_dress_code=request.daily_dress_code,
+			color_comfort=request.color_comfort,
+			style_avoids=request.style_avoids,
+			budget_preference=request.budget_preference,
 		)
 		return {"success": True, "brands": brands}
 	except Exception as e:

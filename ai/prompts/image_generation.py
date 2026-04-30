@@ -34,6 +34,7 @@ def create_flatlay_prompt(outfits: List[Dict[str, Any]]) -> str:
     You may slightly change the body positioning to give a bit of movement, like in a model photoshoot.
     The vibe of the clothing should be realistic and trendy, like a pinterest post. Think FASHION.
     The user should be looking directly at the camera. KEEP A HIGH FIDELITY OF THE USER'S FACE. CLOSED MOUTH. MODEL GAZE.
+    Never roll, cuff, scrunch, or push up shirt sleeves or overshirt sleeves. Sleeves should hang naturally at their intended length.
     {separator_instruction}
     NEVER include any text in the image.
     """
@@ -47,7 +48,11 @@ def create_flatlay_prompt(outfits: List[Dict[str, Any]]) -> str:
 
 def create_virtual_tryon_prompt() -> str:
     """Create a prompt for virtual try-on generation."""
-    return "Use the first image (user model) as base. Use the second image (clothing grid) to dress them. Same size, no text." 
+    return (
+        "Use the first image (user model) as base. Use the second image (clothing grid) to dress them. "
+        "Same size, no text. Never roll, cuff, scrunch, or push up shirt sleeves or overshirt sleeves; "
+        "sleeves should hang naturally at their intended length."
+    ) 
 
 
 def create_fullbody_avatar_prompt(
@@ -77,7 +82,7 @@ def create_fullbody_avatar_prompt(
         "Make the face look natural and aesthetic without changing the user's face. Fix any bad hair or bad complexion."
         "Plain seamless white background, even soft lighting, natural skin tones, no shadows cut off, no text. "
         "Camera: full-length portrait, subject centered, include head to shoes with small margin. "
-        "Image ratio approximately 3:4 (portrait orientation, slightly taller than wide). "
+        "Use a 3:4 portrait composition with comfortable horizontal breathing room on both sides of the body. "
         "Wardrobe: plain white crew‑neck t‑shirt, khaki chino shorts to mid‑thigh, clean white low‑top sneakers, no logos. "
         "Preserve the person's face and hair from the selfie. "
         f"Match body proportions to typical {metrics_text} as guidance if provided." 

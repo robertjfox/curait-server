@@ -294,6 +294,13 @@ class OpenAIClient:
         gender: str,
         location: str,
         job: str | None = None,
+        body_shape: str | None = None,
+        fit_preference: str | None = None,
+        lifestyle_occasions: List[str] | None = None,
+        daily_dress_code: str | None = None,
+        color_comfort: List[str] | None = None,
+        style_avoids: List[str] | None = None,
+        budget_preference: str | None = None,
     ) -> List[str]:
         """Generate brand chips that infer style context during onboarding."""
         fallback = [
@@ -312,12 +319,20 @@ class OpenAIClient:
         ]
         prompt = (
             "Generate exactly 18 fashion brand chips for a personal styling onboarding flow.\n"
-            "The brands should infer the user's style taste. Mix accessible, mid-market, premium, "
-            "streetwear, classic, and contemporary brands. Use real brand names only. "
+            "The brands should infer the user's style taste from all provided onboarding context. "
+            "Include brands that help disambiguate taste across lifestyle, dress code, fit, color, budget, "
+            "and hard no's. Use real brand names only. "
             "No explanations, no categories, no duplicates.\n\n"
             f"Gender: {gender or 'unspecified'}\n"
             f"Location: {location or 'unspecified'}\n"
-            f"Job: {job or 'unspecified'}"
+            f"Job: {job or 'unspecified'}\n"
+            f"Body shape: {body_shape or 'unspecified'}\n"
+            f"Preferred fit: {fit_preference or 'unspecified'}\n"
+            f"Lifestyle occasions: {', '.join(lifestyle_occasions or []) or 'unspecified'}\n"
+            f"Daily dress code: {daily_dress_code or 'unspecified'}\n"
+            f"Comfortable colors: {', '.join(color_comfort or []) or 'unspecified'}\n"
+            f"Hard no's / avoid: {', '.join(style_avoids or []) or 'unspecified'}\n"
+            f"Budget preference: {budget_preference or 'unspecified'}"
         )
         schema = {
             "type": "json_schema",
