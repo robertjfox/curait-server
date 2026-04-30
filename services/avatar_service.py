@@ -4,6 +4,7 @@ from typing import Optional, Dict, Any
 from clients.supabase_client import get_supabase_client
 from clients.gemini_client import get_gemini_client
 from interfaces import db
+from interfaces._retry import with_retry
 from utils.image_processing.image_gen import detect_image_mime_and_ext
 
 
@@ -23,19 +24,19 @@ class AvatarService:
 	AVATAR_BUCKET = "user-avatars"
 
 	def __init__(self) -> None:
-		self.supabase = get_supabase_client()
 		self.gemini = get_gemini_client()
 
 	def _download_selfie_bytes(self, user_id: str) -> bytes:
 		logger.info(f"[AVATAR] Looking for selfie in '{self.SELFIE_BUCKET}' for user_id={user_id}")
-		storage = self.supabase.storage.from_(self.SELFIE_BUCKET)
 		exts = [".png", ".jpg", ".jpeg", ".webp"]
 		last_error: Optional[Exception] = None
 		for ext in exts:
 			path = f"{user_id}{ext}"
 			try:
 				logger.debug(f"[AVATAR] Trying selfie path: {path}")
-				data = storage.download(path)
+				def _download() -> bytes:
+					return get_supabase_client().storage.from_(self.SELFIE_BUCKET).download(path)
+				data = with_retry(_download)
 				if data:
 					logger.info(f"[AVATAR] Found selfie: {path} bytes={len(data)}")
 					return data
@@ -45,7 +46,9 @@ class AvatarService:
 		try:
 			fallback = "user_face.png"
 			logger.debug(f"[AVATAR] Trying fallback selfie: {fallback}")
-			data = storage.download(fallback)
+			def _download_fallback() -> bytes:
+				return get_supabase_client().storage.from_(self.SELFIE_BUCKET).download(fallback)
+			data = with_retry(_download_fallback)
 			if data:
 				logger.info(f"[AVATAR] Using fallback selfie: {fallback} bytes={len(data)}")
 				return data
@@ -65,11 +68,13 @@ class AvatarService:
 		height_cm = user.get("height_cm")
 		weight_kg = user.get("weight_kg")
 		gender = (user.get("gender") or "") or None
+		raw_context: Dict[str, Any] = user.get("onboarding_raw_context") or {}
 		if height_cm is None or weight_kg is None:
 			ctx: Dict[str, Any] = user.get("context") or {}
-			height_cm = height_cm if height_cm is not None else ctx.get("height_cm")
-			weight_kg = weight_kg if weight_kg is not None else ctx.get("weight_kg")
+			height_cm = height_cm if height_cm is not None else raw_context.get("height_cm") or ctx.get("height_cm")
+			weight_kg = weight_kg if weight_kg is not None else raw_context.get("weight_kg") or ctx.get("weight_kg")
 			gender = gender or ctx.get("gender")
+		gender = gender or raw_context.get("gender")
 		try:
 			height_cm = float(height_cm) if height_cm is not None else None
 		except Exception:
@@ -88,21 +93,31 @@ class AvatarService:
 	def _upload_avatar(self, *, user_id: str, image_bytes: bytes) -> str:
 		mime_type, ext = detect_image_mime_and_ext(image_bytes)
 		filename = f"{user_id}{ext}"
-		storage = self.supabase.storage.from_(self.AVATAR_BUCKET)
 		file_options = {"content-type": mime_type, "upsert": "true"}
 
-		max_retries = 3
-		for attempt in range(max_retries):
-			try:
-				storage.upload(filename, image_bytes, file_options)
-				return storage.get_public_url(filename)
-			except Exception as e:
-				if attempt == max_retries - 1:
-					logger.error(f"Failed to upload avatar for {user_id}: {e}")
-					raise
-				logger.warning(f"Upload attempt {attempt + 1} failed; retrying… {e}")
+		def _upload() -> str:
+			storage = get_supabase_client().storage.from_(self.AVATAR_BUCKET)
+			storage.upload(filename, image_bytes, file_options)
+			return storage.get_public_url(filename)
 
-		return storage.get_public_url(filename)
+		try:
+			return with_retry(_upload)
+		except Exception as e:
+			logger.error(f"Failed to upload avatar for {user_id}: {e}")
+			raise
+
+	def get_current_avatar_url(self, user_id: str) -> Optional[str]:
+		try:
+			def _list_avatars():
+				return get_supabase_client().storage.from_(self.AVATAR_BUCKET).list()
+			for item in with_retry(_list_avatars):
+				name = item.get("name") if isinstance(item, dict) else None
+				if isinstance(name, str) and name.startswith(f"{user_id}."):
+					storage = get_supabase_client().storage.from_(self.AVATAR_BUCKET)
+					return storage.get_public_url(name)
+		except Exception as e:
+			logger.warning(f"[AVATAR] Failed to list avatar for user_id={user_id}: {e}")
+		return None
 
 	def generate_and_store_avatar(
 		self,

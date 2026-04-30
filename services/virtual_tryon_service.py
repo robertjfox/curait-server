@@ -6,6 +6,7 @@ import asyncio
 
 from clients.gemini_client import get_gemini_client
 from clients.supabase_client import get_supabase_client
+from interfaces._retry import with_retry
 from utils.logging.terminal_links import hyperlink
 from utils.image_processing.thumbnail_compressor import compress_thumbnails_to_grid
 
@@ -16,7 +17,6 @@ class VirtualTryOnService:
 
 	def __init__(self):
 		self.gemini_client = get_gemini_client()
-		self.supabase = get_supabase_client()
 
 	async def generate_virtual_tryon(
 		self,
@@ -68,7 +68,7 @@ class VirtualTryOnService:
 		filename = f"virtual_tryon_{uuid.uuid4()}.png"
 
 		def _upload() -> str:
-			storage = self.supabase.storage.from_("virtual-tryon-images")
+			storage = get_supabase_client().storage.from_("virtual-tryon-images")
 			storage.upload(
 				path=filename,
 				file=image_bytes,
@@ -77,7 +77,7 @@ class VirtualTryOnService:
 			return storage.get_public_url(filename)
 
 		# Supabase storage SDK is sync; run in a worker thread.
-		url = await asyncio.to_thread(_upload)
+		url = await asyncio.to_thread(lambda: with_retry(_upload))
 
 		duration = time.time() - start_time
 		grid_link = f" | {hyperlink(grid_url, 'View Input Grid')}" if grid_url else ""

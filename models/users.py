@@ -12,6 +12,7 @@ class UserBase(BaseModel):
     gender: Optional[str] = None
 
     context: Optional[Dict[str, Any]] = {}
+    onboarding_raw_context: Optional[Dict[str, Any]] = {}
 
 
 class UserCreate(UserBase):

@@ -2,10 +2,19 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 import logging
 
 from services.avatar_service import get_avatar_service
-from models.avatars import AvatarResponse
+from models.avatars import AvatarResponse, CurrentAvatarResponse
+from clients.supabase_client import get_supabase_client
+from interfaces._retry import with_retry
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["avatars"])
+
+
+@router.get("/avatars/{user_id}", response_model=CurrentAvatarResponse)
+def get_current_avatar(user_id: str):
+	avatar_service = get_avatar_service()
+	image_url = avatar_service.get_current_avatar_url(user_id)
+	return CurrentAvatarResponse(image_url=image_url)
 
 
 @router.post("/avatars/{user_id}/generate", response_model=AvatarResponse)
@@ -22,12 +31,14 @@ def generate_avatar(user_id: str, selfie: UploadFile = File(...)):
 		)
 
 		# Store selfie in bucket first.
-		storage = avatar_service.supabase.storage.from_(avatar_service.SELFIE_BUCKET)
 		filename = f"{user_id}.png"
 		try:
 			content_type = selfie.content_type or "application/octet-stream"
-			storage.upload(filename, selfie_bytes, {"content-type": content_type, "upsert": "true"})
-			selfie_public_url = storage.get_public_url(filename)
+			def _upload_selfie() -> str:
+				storage = get_supabase_client().storage.from_(avatar_service.SELFIE_BUCKET)
+				storage.upload(filename, selfie_bytes, {"content-type": content_type, "upsert": "true"})
+				return storage.get_public_url(filename)
+			selfie_public_url = with_retry(_upload_selfie)
 			logger.info(f"[AVATAR] Selfie stored at {selfie_public_url}")
 		except Exception as e:
 			logger.exception(f"[AVATAR] Failed to store selfie for user_id={user_id}")

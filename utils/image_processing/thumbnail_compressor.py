@@ -8,6 +8,7 @@ from typing import List, Optional, Tuple, Dict, Any
 from PIL import Image, ImageOps, ImageDraw, ImageFont
 import httpx
 from clients.supabase_client import get_supabase_client
+from interfaces._retry import with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -152,14 +153,15 @@ async def compress_thumbnails_to_grid(
 
 	def _upload() -> Optional[str]:
 		try:
-			supabase = get_supabase_client()
-			storage = supabase.storage.from_("vton-image-input-grid")
-			storage.upload(
-				path=filename,
-				file=img_bytes,
-				file_options={"content-type": "image/jpeg"},
-			)
-			return storage.get_public_url(filename)
+			def _do_upload() -> str:
+				storage = get_supabase_client().storage.from_("vton-image-input-grid")
+				storage.upload(
+					path=filename,
+					file=img_bytes,
+					file_options={"content-type": "image/jpeg"},
+				)
+				return storage.get_public_url(filename)
+			return with_retry(_do_upload)
 		except Exception as e:
 			logger.error(f"❌ Failed to upload VTON grid to Supabase: {str(e)}")
 			return None

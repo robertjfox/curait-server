@@ -47,6 +47,8 @@ class UsersInterface:
         try:
             return with_retry(_query)
         except Exception as e:
+            if "PGRST116" in str(e) or "contains 0 rows" in str(e):
+                return None
             if is_transient_supabase_error(e):
                 logger.warning("Transient Supabase error on users.get(%s): %s", user_id, e)
                 return None
@@ -70,10 +72,13 @@ class UsersInterface:
             return None
         
         exclude_fields = {
-            'id', 'email', 'created_at', 'updated_at'
+            'id', 'email', 'created_at', 'updated_at', 'onboarding_raw_context'
         }
 
         result: Dict[str, Any] = {k: v for k, v in user.items() if k not in exclude_fields and v is not None}
+        context = result.get("context")
+        if isinstance(context, dict):
+            result["context"] = context
 
         return result
 

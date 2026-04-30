@@ -16,6 +16,7 @@ from utils.image_processing.image_gen import (
 	load_user_avatar_from_url,
 )
 from utils.image_processing.user_selfie_handler import get_user_avatar_urls
+from interfaces._retry import with_retry
 from ai.prompts.image_generation import (
 	create_flatlay_prompt,
 	create_virtual_tryon_prompt,
@@ -63,7 +64,7 @@ _AVATAR_CACHE_MAX = 8
 class GeminiClient:
 	"""Wrapper around Google Gemini image generation."""
 
-	MODEL = "gemini-2.5-flash-image"
+	MODEL = config.GEMINI_FLOW_IMAGE_GENERATION["model"]
 
 	def __init__(self, *, api_key: Optional[str] = None):
 		if not GEMINI_AVAILABLE:
@@ -92,26 +93,38 @@ class GeminiClient:
 		if not response.candidates:
 			return None
 		for part in response.candidates[0].content.parts:
+			if getattr(part, "thought", False):
+				continue
 			if hasattr(part, "inline_data") and part.inline_data:
 				return part.inline_data.data
 		return None
 
-	def _generate_image(self, contents: List, *, aspect_ratio: str = "9:16") -> Optional[bytes]:
+	def _generate_image(
+		self,
+		contents: List,
+		*,
+		aspect_ratio: str = "9:16",
+		generation_config: Optional[Dict[str, Any]] = None,
+	) -> Optional[bytes]:
 		try:
+			settings = generation_config or config.GEMINI_FLOW_IMAGE_GENERATION
+			image_size = settings.get("image_size", "1K")
+			response_modalities = settings.get("response_modalities", ["IMAGE"])
+			model = settings.get("model", self.MODEL)
 			start_time = time.time()
-			logger.info("[GEMINI] ▶︎ request started")
+			logger.info(f"[GEMINI] ▶︎ request started model={model}")
 			response = self.client.models.generate_content(
-				model=self.MODEL,
+				model=model,
 				contents=contents,
 				config=genai_types.GenerateContentConfig(
-					temperature=0.4,
-					top_p=0.8,
-					top_k=32,
-					candidate_count=1,
-					response_modalities=["IMAGE"],
+					temperature=settings.get("temperature", 0.4),
+					top_p=settings.get("top_p", 0.8),
+					top_k=settings.get("top_k", 32),
+					candidate_count=settings.get("candidate_count", 1),
+					response_modalities=response_modalities,
 					image_config=genai_types.ImageConfig(
 						aspect_ratio=aspect_ratio,
-						image_size="1K",
+						image_size=image_size,
 					),
 				) if contents and len(contents) > 1 else None,
 			)
@@ -178,7 +191,12 @@ class GeminiClient:
 			weight_kg=weight_kg,
 			gender=gender,
 		)
-		return self._generate_image([prompt, selfie_img], aspect_ratio="3:4")
+		avatar_config = config.GEMINI_AVATAR_GENERATION
+		return self._generate_image(
+			[prompt, selfie_img],
+			aspect_ratio=avatar_config.get("aspect_ratio", "3:4"),
+			generation_config=avatar_config,
+		)
 
 	async def generate_flatlay_and_upload(
 		self,
@@ -192,7 +210,6 @@ class GeminiClient:
 			avatar = await asyncio.to_thread(self._get_flatlay_avatar, user_id)
 			urls: List[Optional[str]] = []
 
-			supabase = get_supabase_client()
 			bucket = getattr(config.model_config, "FLATLAY_RENDERING", {}).get(
 				"bucket", "outfit-flatlay-images"
 			)
@@ -220,22 +237,15 @@ class GeminiClient:
 				filename = f"outfit_tryon_{uuid.uuid4().hex}{ext}"
 
 				def _upload(payload: bytes = image_bytes, name: str = filename, mt: str = mime_type) -> Optional[str]:
-					storage = supabase.storage.from_(bucket)
+					storage = get_supabase_client().storage.from_(bucket)
 					storage.upload(name, payload, {"content-type": mt})
 					return storage.get_public_url(name)
 
 				url: Optional[str] = None
-				max_retries = 3
-				for attempt in range(max_retries):
-					try:
-						url = await asyncio.to_thread(_upload)
-						break
-					except Exception as e:
-						if attempt == max_retries - 1:
-							logger.error(f"Failed to upload after {max_retries} attempts: {e}")
-						else:
-							logger.warning(f"Upload attempt {attempt + 1} failed, retrying: {e}")
-							await asyncio.sleep(1)
+				try:
+					url = await asyncio.to_thread(lambda: with_retry(_upload))
+				except Exception as e:
+					logger.error(f"Failed to upload flatlay image: {e}")
 				urls.append(url)
 
 			return urls

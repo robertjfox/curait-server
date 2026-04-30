@@ -22,7 +22,7 @@ class PromptSuggestionsService:
 		max_threads: int = 10,
 		ignore_throttle: bool = False,
 	) -> List[str]:
-		"""Compute prompt suggestions from user context + first messages of recent threads."""
+		"""Compute prompt suggestions from user context + recent thread history."""
 		try:
 			user_row = await aexec(db.users.get, user_id)
 
@@ -46,21 +46,33 @@ class PromptSuggestionsService:
 					if delta_sec >= 0 and delta_sec < 90 and len(existing_prompts) >= 1:
 						return existing_prompts[:4]
 
-			user_data = await aexec(db.users.get_relevant_context, user_id) or {}
+			user_data = self._build_user_data(user_row or {})
 
 			recent_threads = await aexec(db.threads.list_recent_by_user, user_id, max_threads)
-			first_messages: List[str] = []
+			thread_signals: List[Dict[str, Any]] = []
 			for t in recent_threads:
 				thread_id = t.get("id") if t else None
 				if not thread_id:
 					continue
 				comments = await aexec(db.threads.get_comments, thread_id)
-				if comments:
-					first_messages.append(comments[0].get("message", ""))
+				messages = [
+					str(comment.get("message", "")).strip()
+					for comment in comments
+					if isinstance(comment, dict) and str(comment.get("message", "")).strip()
+				]
+				thread_signals.append(
+					{
+						"title": t.get("title"),
+						"created_at": t.get("created_at"),
+						"updated_at": t.get("updated_at"),
+						"first_prompt": messages[0] if messages else None,
+						"recent_prompts": messages[-3:],
+					}
+				)
 
 			prompts = await self.openai.generate_prompt_suggestions(
 				user_data=user_data,
-				first_messages=first_messages[:max_threads],
+				thread_signals=thread_signals[:max_threads],
 				existing_prompts=existing_prompts[:4] if existing_prompts else None,
 			)
 
@@ -77,6 +89,22 @@ class PromptSuggestionsService:
 		except Exception as e:
 			logger.error(f"PromptSuggestionsService failed for user {user_id[:6]}: {e}")
 			raise
+
+	def _build_user_data(self, user_row: Dict[str, Any]) -> Dict[str, Any]:
+		context = user_row.get("context") or {}
+		raw_context = user_row.get("onboarding_raw_context") or {}
+		if not isinstance(context, dict):
+			context = {}
+		if not isinstance(raw_context, dict):
+			raw_context = {}
+
+		return {
+			"first_name": user_row.get("first_name"),
+			"gender": user_row.get("gender") or raw_context.get("gender"),
+			"location": user_row.get("location") or raw_context.get("location"),
+			"context": context,
+			"onboarding_raw_context": raw_context,
+		}
 
 
 _service: Optional[PromptSuggestionsService] = None

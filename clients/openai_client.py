@@ -31,6 +31,7 @@ from _config.model_config import (
     TITLE_GENERATION,       
     PROMPT_SUGGESTIONS,
     STYLE_BRAND_CHIPS,
+    STYLE_CONTEXT_SYNTHESIS,
 )
 
 logger = logging.getLogger(__name__)
@@ -216,17 +217,18 @@ class OpenAIClient:
         self,
         *,
         user_data: Dict[str, Any],
-        first_messages: List[str],
+        thread_signals: List[Dict[str, Any]],
         existing_prompts: List[str] = None,
     ) -> List[str]:
         """Return 4 short, one-sentence prompt suggestions tailored to the user."""
-        msgs = build_prompt_suggestions_messages(user_data, first_messages, existing_prompts)
+        msgs = build_prompt_suggestions_messages(user_data, thread_signals, existing_prompts)
         schema = generate_prompt_suggestions_schema()
         try:
             response = await self.client.chat.completions.create(
                 model=PROMPT_SUGGESTIONS["model"],
                 messages=msgs,
                 response_format=schema,
+                **model_request_options(PROMPT_SUGGESTIONS),
             )
             content = response.choices[0].message
             # Expect JSON tool output under response_format, similar to other flows
@@ -288,14 +290,99 @@ class OpenAIClient:
             logger.warning(f"Prompt suggestions failed, falling back: {e}")
             return []
 
+    async def synthesize_style_context(
+        self,
+        *,
+        user_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Deeply synthesize onboarding context into a durable styling profile."""
+        schema = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "style_context_synthesis",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "summary": {"type": "string"},
+                        "style_hypothesis": {"type": "string"},
+                        "brand_signal_analysis": {"type": "string"},
+                        "fit_and_silhouette_guidance": {"type": "string"},
+                        "shopping_strategy": {"type": "string"},
+                        "risk_notes": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 3,
+                            "maxItems": 8,
+                        },
+                        "taste_dimensions": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 5,
+                            "maxItems": 12,
+                        },
+                        "initial_generation_guidelines": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 6,
+                            "maxItems": 14,
+                        },
+                    },
+                    "required": [
+                        "summary",
+                        "style_hypothesis",
+                        "brand_signal_analysis",
+                        "fit_and_silhouette_guidance",
+                        "shopping_strategy",
+                        "risk_notes",
+                        "taste_dimensions",
+                        "initial_generation_guidelines",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
+        }
+        prompt = (
+            "Think deeply and synthesize this user's starting style context for an AI stylist.\n"
+            "This synthesis will guide future outfit generation, product search, and ranking. "
+            "Do not be shallow. Reason carefully from the combination of location, age range, job, "
+            "gender, body/fit context, and especially selected brands/custom brand notes.\n\n"
+            "Important principles:\n"
+            "- Treat selected brands as taste signals, not strict requirements.\n"
+            "- Infer likely price comfort, silhouette preferences, formality, trend tolerance, lifestyle, "
+            "and shopping accessibility.\n"
+            "- Preserve uncertainty. Do not overfit from a small number of brands.\n"
+            "- Identify useful hypotheses and risks the generator should keep in mind.\n"
+            "- Write guidance that is directly useful to another outfit-generation model.\n\n"
+            "USER_DATA_JSON:\n"
+            f"{json.dumps(user_data or {}, ensure_ascii=False, indent=2)}"
+        )
+        response = await self.client.chat.completions.create(
+            model=STYLE_CONTEXT_SYNTHESIS["model"],
+            messages=[
+                {"role": "system", "content": "You are a senior fashion taste strategist for an AI stylist."},
+                {"role": "user", "content": prompt},
+            ],
+            response_format=schema,
+            **model_request_options(STYLE_CONTEXT_SYNTHESIS),
+        )
+        content = response.choices[0].message.content or "{}"
+        parsed = json.loads(content)
+        if not isinstance(parsed, dict):
+            raise ValueError("Style context synthesis returned invalid JSON")
+        return parsed
+
     async def generate_style_brand_chips(
         self,
         *,
         gender: str,
+        age_range: str | None = None,
         location: str,
         job: str | None = None,
         body_shape: str | None = None,
         fit_preference: str | None = None,
+        height_feet: int | None = None,
+        height_inches: int | None = None,
         lifestyle_occasions: List[str] | None = None,
         daily_dress_code: str | None = None,
         color_comfort: List[str] | None = None,
@@ -316,16 +403,46 @@ class OpenAIClient:
             "Levi's",
             "Zara",
             "The Row",
+            "Madewell",
+            "Reformation",
+            "Banana Republic",
+            "Abercrombie & Fitch",
+            "Lululemon",
+            "Buck Mason",
+            "Massimo Dutti",
+            "Theory",
+            "Acne Studios",
+            "Patagonia",
+            "Carhartt WIP",
+            "Sandro",
+            "Mango",
+            "H&M",
+            "ASOS",
+            "Arc'teryx",
+            "New Balance",
+            "Dr. Martens",
+            "Sézane",
+            "Vince",
         ]
         prompt = (
-            "Generate exactly 18 fashion brand chips for a personal styling onboarding flow.\n"
-            "The brands should infer the user's style taste from all provided onboarding context. "
-            "Include brands that help disambiguate taste across lifestyle, dress code, fit, color, budget, "
-            "and hard no's. Use real brand names only. "
-            "No explanations, no categories, no duplicates.\n\n"
+            "Think carefully and generate exactly 32 fashion brand chips for a personal styling onboarding flow.\n"
+            "Your goal is not to predict one perfect style. Your goal is to gather maximum taste signal from "
+            "a small set of brand choices. Use every piece of context provided so far: where the user lives, "
+            "what they do, gender, age range, height, body shape, and fit preference.\n"
+            "Return a useful RANGE: accessible basics, mall/contemporary, premium, trend-forward, classic, "
+            "minimal, sporty/athletic, work-appropriate, going-out, local/coastal/urban climate-relevant, and "
+            "a few aspirational references where appropriate. Avoid 32 brands that all imply the same taste or "
+            "budget. Include brands that create clear forks in style signal.\n"
+            "Use recognizable brands that a typical style-conscious shopper is likely to know or can quickly "
+            "understand. Do not include super obscure, tiny, archival, invite-only, or hard-to-shop labels. "
+            "Prefer brands with meaningful online availability and enough cultural/style signal for onboarding.\n"
+            "Use real apparel/footwear brands only. No explanations, no categories, no duplicates.\n\n"
             f"Gender: {gender or 'unspecified'}\n"
+            f"Age range: {age_range or 'unspecified'}\n"
             f"Location: {location or 'unspecified'}\n"
             f"Job: {job or 'unspecified'}\n"
+            f"Height: {height_feet if height_feet is not None else 'unspecified'} ft "
+            f"{height_inches if height_inches is not None else 'unspecified'} in\n"
             f"Body shape: {body_shape or 'unspecified'}\n"
             f"Preferred fit: {fit_preference or 'unspecified'}\n"
             f"Lifestyle occasions: {', '.join(lifestyle_occasions or []) or 'unspecified'}\n"
@@ -345,8 +462,8 @@ class OpenAIClient:
                         "brands": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "minItems": 18,
-                            "maxItems": 18,
+                            "minItems": 32,
+                            "maxItems": 32,
                         }
                     },
                     "required": ["brands"],
@@ -376,7 +493,7 @@ class OpenAIClient:
                 value = str(brand or "").strip()
                 if value and value not in cleaned:
                     cleaned.append(value)
-            return (cleaned + fallback)[:18]
+            return (cleaned + fallback)[:32]
         except Exception as e:
             logger.warning(f"Style brand chips failed, falling back: {e}")
             return fallback

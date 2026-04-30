@@ -28,6 +28,8 @@ _TRANSIENT_ERROR_MARKERS = (
 	"remote end closed connection",
 	"connection reset",
 	"econnreset",
+	"client has been closed",
+	"cannot send a request",
 )
 
 
@@ -37,38 +39,32 @@ def is_transient_supabase_error(exc: BaseException) -> bool:
 
 
 def _reset_supabase_pool() -> None:
-	"""Force-close the Supabase SDK's httpx session so the *next* request
-	opens a fresh socket instead of reusing a dead one from the pool.
+	"""Replace the Supabase SDK client so the next request uses fresh sessions.
 
 	Walks several possible attribute paths because supabase-py's internal
 	layout has shifted across versions; silently no-ops if none match.
 	"""
 	try:
-		from clients.supabase_client import get_supabase_client
+		from clients.supabase_client import get_supabase_client, reset_supabase_client
+		reset_supabase_client()
 		client = get_supabase_client()
 	except Exception:
 		return
 
-	candidate_paths: tuple[tuple[str, ...], ...] = (
-		("postgrest", "session"),
-		("postgrest", "_session"),
-		("postgrest", "session", "_transport"),
-		("storage", "_client"),
-		("auth", "_http_client"),
-	)
-	for path in candidate_paths:
-		obj: Any = client
-		try:
-			for attr in path:
-				obj = getattr(obj, attr)
-		except AttributeError:
-			continue
-		close = getattr(obj, "close", None)
-		if callable(close):
-			try:
-				close()
-			except Exception:
-				pass
+	try:
+		from interfaces import db
+		for interface in (
+			db.outfits,
+			db.outfit_items,
+			db.threads,
+			db.users,
+			db.saved_products,
+			getattr(db.outfits, "outfit_items_interface", None),
+		):
+			if interface is not None and hasattr(interface, "_supabase"):
+				setattr(interface, "_supabase", client)
+	except Exception:
+		pass
 
 
 def with_retry(

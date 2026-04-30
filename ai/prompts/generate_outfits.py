@@ -21,9 +21,12 @@ def generate_outfit_system_prompt(user_gender: str = None) -> str:
         "Goal: brainstorm shoppable, realistic outfits that feel fresh and wearable.\n\n"
 
         "PRIORITY RULES:\n"
-        "- The user's latest request is the primary source of truth. User profile, brands, and style references are secondary.\n"
+        "- The user's latest request is the primary source of truth for occasion, activity, weather, and formality.\n"
+        "- The user's context is the taste lens: choose outfits and items that feel like this specific person would actually wear them.\n"
+        "- Honor the user's fit_and_silhouette_guidance literally. If the user prefers loose, relaxed, oversized, or baggy fits, pick silhouettes that match (relaxed, oversized, wide-leg, slouchy) and reflect that in keywords. Do the same for slim/tailored preferences. Never put a loose-fit user in skinny/slim/fitted pieces.\n"
         "- Never ignore the stated activity, occasion, dress code, or setting in the latest request.\n"
-        "- If brand/style context conflicts with the latest request, adapt the style context to the request instead of overriding it.\n"
+        "- If style context conflicts with the latest request, adapt the user's vibe to the request instead of abandoning either one.\n"
+        "- Do not make everyone generically polished or smart casual. Only use dressier pieces when the request or user context supports it.\n"
         "- For athletic or active requests (run club, gym, workout, hike, sport), create functional athletic outfits with appropriate performance pieces and footwear. Do not style them as casual cafe, office, or smart casual looks unless explicitly asked.\n\n"
 
         "COMPOSITION RULES:\n"
@@ -44,9 +47,10 @@ def generate_outfit_system_prompt(user_gender: str = None) -> str:
         "- ALWAYS include a simple color in the keywords. Dont make the colors TOO SPECIFIC.\n"
         "- Color should be in the format color:navy, color:beige, color:black etc.\n"
         "- Only gender+color+noun are required; material/fit optional and kept broad.\n"
-        "- Tops: fit and sleeve length helpful (e.g., long sleeve).\n"
-        "- Bottoms: fit and cut/length helpful (e.g., wide leg, cropped).\n"
-        "- No brands. ~6–12 tokens total. Keep queries broad enough for search.\n"
+        "- Tops: fit and sleeve length helpful (e.g., relaxed long sleeve, oversized tee).\n"
+        "- Bottoms: fit and cut/length helpful (e.g., wide leg, cropped, baggy, relaxed).\n"
+        "- When user context specifies a fit preference, the matching fit token (e.g., relaxed, loose, oversized, baggy, slim, tailored) MUST appear in tops and bottoms keywords.\n"
+        "- No brands. ~6–12 tokens total. Keep queries broad enough for search, but include natural vibe descriptors when useful.\n"
 
         "- DONT be vague. A jacket needs more description than just 'jacket'. A sweatshirt should be hooded, crewneck, zip etc. A shirt should be button up, t shirt, polo, etc. These are just examples. Use your BEST judgement without being TOO SPECIFIC. \n\n"
     )
@@ -72,7 +76,9 @@ def generate_outfit_user_prompt(
     return (
         f"Create {num_outfits} distinct, complete outfit(s) using the structured function.\n\n"
         + f"LATEST_USER_REQUEST:\n{latest_user_request}\n\n"
-        + "Treat LATEST_USER_REQUEST as mandatory. USER_CONTEXT is only preference guidance.\n\n"
+        + "Treat LATEST_USER_REQUEST as mandatory for the moment being styled. "
+        + "Treat USER_CONTEXT as the user's taste and vibe. It should quietly shape item choices, silhouette, formality, footwear, and palette. "
+        + "Do not treat it as a checklist, but do not ignore it or default to generic outfits.\n\n"
         + f"USER_PROFILE:\n{j(safe_user)}\n\n"
         + f"USER_CONTEXT:\n{j(ctx)}\n\n"
         + f"OUTFIT_HISTORY:\n{formatted_outfit_history}\n\n"

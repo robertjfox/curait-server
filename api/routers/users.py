@@ -5,6 +5,9 @@ from pydantic import BaseModel
 from interfaces import db, aexec
 from models.users import UserUpdate
 from clients.openai_client import get_openai_client
+from services.style_context_service import get_style_context_service
+from services.prompt_suggestions_service import get_prompt_suggestions_service
+from utils.background_tasks import spawn
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -12,10 +15,13 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 
 class StyleBrandChipsRequest(BaseModel):
 	gender: str | None = None
+	age_range: str | None = None
 	location: str | None = None
 	job: str | None = None
 	body_shape: str | None = None
 	fit_preference: str | None = None
+	height_feet: int | None = None
+	height_inches: int | None = None
 	lifestyle_occasions: list[str] = []
 	daily_dress_code: str | None = None
 	color_comfort: list[str] = []
@@ -63,6 +69,21 @@ async def update_user(user_id: str, request: UserUpdate):
 		user = await aexec(db.users.update, user_id, updates)
 		if not user:
 			raise HTTPException(status_code=404, detail="User not found")
+		raw_context = updates.get("onboarding_raw_context")
+		if isinstance(raw_context, dict) and raw_context.get("selected_brands"):
+			spawn(
+				get_style_context_service().synthesize_and_save(user_id),
+				name=f"style-context:{user_id[:6]}",
+				key=f"style-context:{user_id}",
+			)
+			spawn(
+				get_prompt_suggestions_service().generate_and_save(
+					user_id,
+					ignore_throttle=True,
+				),
+				name=f"prompt-suggestions-initial:{user_id[:6]}",
+				key=f"prompt-suggestions:{user_id}",
+			)
 		return {"success": True, "user": user}
 	except HTTPException:
 		raise
@@ -77,10 +98,13 @@ async def generate_style_brand_chips(request: StyleBrandChipsRequest):
 	try:
 		brands = await get_openai_client().generate_style_brand_chips(
 			gender=request.gender or "",
+			age_range=request.age_range,
 			location=request.location or "",
 			job=request.job,
 			body_shape=request.body_shape,
 			fit_preference=request.fit_preference,
+			height_feet=request.height_feet,
+			height_inches=request.height_inches,
 			lifestyle_occasions=request.lifestyle_occasions,
 			daily_dress_code=request.daily_dress_code,
 			color_comfort=request.color_comfort,

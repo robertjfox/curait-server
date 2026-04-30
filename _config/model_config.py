@@ -18,8 +18,8 @@ GPT_5_5 = 'gpt-5.5'
 # CORE FUNCTIONALITY CONFIGS ===============================
 
 OUTFIT_GENERATION = {
-    "model": GPT_5_4,
-    "reasoning_effort": 'low',
+    "model": GPT_5_5,
+    "reasoning_effort": 'medium',
 }
 
 
@@ -34,12 +34,43 @@ TITLE_GENERATION = {
 }
 
 PROMPT_SUGGESTIONS = {
-       "model": GPT_5_5,
-       "reasoning_effort": 'high',
+       "model": GPT_5_4,
+       "reasoning_effort": 'medium',
 }
 
 STYLE_BRAND_CHIPS = {
        "model": GPT_5_5,
        "reasoning_effort": 'high',
+}
+
+STYLE_CONTEXT_SYNTHESIS = {
+       "model": GPT_5_5,
+       "reasoning_effort": 'xhigh',
+}
+
+
+# GEMINI IMAGE CONFIGS ======================================
+
+GEMINI_FLOW_IMAGE_GENERATION = {
+       "model": "gemini-2.5-flash-image",
+       "temperature": 0.4,
+       "top_p": 0.8,
+       "top_k": 32,
+       "candidate_count": 1,
+       "response_modalities": ["IMAGE"],
+       "image_size": "1K",
+}
+
+GEMINI_AVATAR_GENERATION = {
+       # Highest-quality image editing model in the Gemini API docs.
+       # This is intentionally separate from the faster outfit image flow.
+       "model": "gemini-3-pro-image-preview",
+       "temperature": 0.15,
+       "top_p": 0.8,
+       "top_k": 32,
+       "candidate_count": 1,
+       "response_modalities": ["TEXT", "IMAGE"],
+       "aspect_ratio": "3:4",
+       "image_size": "4K",
 }
 

@@ -7,6 +7,7 @@ import base64
 
 from clients.openai_client import get_openai_client
 from clients.supabase_client import get_supabase_client
+from interfaces._retry import with_retry
 import _config
 from utils.image_processing.create_image_grid import create_product_grid
 
@@ -18,7 +19,6 @@ _ranking_semaphore = asyncio.Semaphore(max(1, int(_config.RANKING_BATCH_SIZE)))
 class ProductRankingService:
 	def __init__(self):
 		self.openai_client = get_openai_client()
-		self.supabase = get_supabase_client()
 
 	async def _upload_ranking_grid(
 		self,
@@ -41,9 +41,11 @@ class ProductRankingService:
 				item_id = item_context.get("item_id") or "unknown-item"
 				filename = f"{outfit_id}/{item_id}/{int(time.time() * 1000)}-{uuid4().hex}.jpg"
 				bucket = "product-ranking-grids"
-				storage = self.supabase.storage.from_(bucket)
-				storage.upload(filename, image_bytes, {"content-type": "image/jpeg"})
-				return storage.get_public_url(filename)
+				def _upload() -> str:
+					storage = get_supabase_client().storage.from_(bucket)
+					storage.upload(filename, image_bytes, {"content-type": "image/jpeg"})
+					return storage.get_public_url(filename)
+				return with_retry(_upload)
 			except Exception as exc:
 				logger.warning("Failed to upload product ranking grid: %s", exc)
 				return None
@@ -100,13 +102,16 @@ class ProductRankingService:
 					return fallback_results, fallback_ratings
 
 				try:
-					ratings = await self.openai_client.rank_products_flow(
-						user_data=user_data,
-						item_context=item_context,
-						products=ranking_candidates,
-						num_results=n,
-						grid_image_data_uri=grid_data_uri,
-						outfit_row=outfit_row,
+					ratings = await asyncio.wait_for(
+						self.openai_client.rank_products_flow(
+							user_data=user_data,
+							item_context=item_context,
+							products=ranking_candidates,
+							num_results=n,
+							grid_image_data_uri=grid_data_uri,
+							outfit_row=outfit_row,
+						),
+						timeout=float(getattr(_config, "RANKING_TIMEOUT", 60)),
 					)
 
 				except Exception as ranking_err:
